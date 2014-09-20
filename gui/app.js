@@ -225,12 +225,33 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     });
 
     $scope.$on('NodeRejected', function (event, arg) {
+        var i;
         if (typeof $scope.incomingNodeID !== 'undefined') {
             // An incoming request is already being processed in the GUI.
             return;
         }
+        for (i = 0; i < $scope.nodes.length; i++) {
+            // info the node is already in the config, skip it.
+            if ($scope.nodes[i].NodeID === args.data.node) {
+                return;
+            }
+        }
         $scope.incomingNodeID = arg.data.node;
         $('#incomingConnection').modal();
+    });
+
+    $scope.$on('RepoRejected', function (event, arg) {
+        if (typeof $scope.incomingNodeID !== 'undefined') {
+            // An incoming request is already being processed in the GUI.
+            return;
+        }
+        if (!$scope.repos[arg.data.repo]) {
+            // If the repo is entirely unknown, we don't do anything.
+            return;
+        }
+        $scope.incomingNodeID = arg.data.node;
+        $scope.incomingRepoID = arg.data.repo;
+        $('#incomingRepo').modal();
     });
 
     $scope.$on('ConfigLoaded', function (event) {
@@ -977,6 +998,18 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         $scope.config.BlockedNodes.push($scope.incomingNodeID);
         $scope.saveConfig();
         delete $scope.incomingNodeID;
+    };
+
+    // Share the repository with a new node.
+    $scope.acceptRepo = function () {
+        $('#incomingRepo').modal('hide');
+        $scope.repos[$scope.incomingRepoID].Nodes.push({
+            NodeID: $scope.incomingNodeID
+        })
+        $scope.config.Repositories = repoList($scope.repos);
+        $scope.saveConfig();
+        delete $scope.incomingNodeID;
+        delete $scope.incomingRepoID;
     };
 
     $scope.init();

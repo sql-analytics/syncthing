@@ -695,22 +695,57 @@
 
   <!-- Incoming node connection modal -->
 
-  <div id="incomingConnection" class="modal fade" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header alert alert-info">
-        <h4 translate class="modal-title">New Incoming Connection</h4>
+  <div id="incomingConnection" class="modal fade" data-backdrop="static" data-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header alert alert-info">
+          <h4 translate class="modal-title">New Incoming Connection</h4>
+        </div>
+        <div class="modal-body">
+          <p>
+            <span translate>A connection was received from a node with the ID below.</span>
+            <span translate>Do you want to accept the connection and add the new node to the configuration?</span>
+          </p>
+          <pre>{{incomingNodeID}}</pre>
+        </div>
+        <div class="modal-footer">
+          <button ng-click="blockNode()" class="btn btn-danger btn-sm"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Block Node</span></button>
+          <button ng-click="acceptNode()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Add Node</span></button>
+        </div>
       </div>
-      <div class="modal-body">
-        <p>
-          <span translate>A connection was received from a node with the ID below.</span>
-          <span translate>Do you want to accept the connection and add the new node to the configuration?</span>
-        </p>
-        <pre>{{incomingNodeID}}</pre>
-      </div>
-      <div class="modal-footer">
-        <button ng-click="blockNode()" class="btn btn-danger btn-sm"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Block Node</span></button>
-        <button ng-click="acceptNode()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Add Node</span></button>
+    </div>
+  </div>
+
+  <!-- Incoming unshared repo modal -->
+
+  <div id="incomingRepo" class="modal fade" data-backdrop="static" data-keyboard="false" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header alert alert-info">
+          <h4 translate class="modal-title">Repository Sharing Request</h4>
+        </div>
+        <div class="modal-body">
+          <p>
+            <span translate>Another node wants to share an existing repository with you.</span>
+            <span translate>If accepted, their contents will be merged with the current repository contents.</span>
+            </p>
+          <table class="table table-condensed table-striped">
+            <tbody>
+              <tr>
+                <th><span class="glyphicon glyphicon-tag"></span>&emsp;<span translate>Repository ID</span></th>
+                <td class="text-right">{{incomingRepoID}}</td>
+              </tr>
+              <tr>
+                <th><span class="glyphicon glyphicon-share-alt"></span>&emsp;<span translate>Shared With</span></th>
+                <td class="text-right">{{nodeName(findNode(incomingNodeID))}}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default btn-sm" data-dismiss="modal"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Ignore</span></button>
+          <button ng-click="acceptRepo()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Share Repository</span></button>
+        </div>
       </div>
     </div>
   </div>
