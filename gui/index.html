@@ -693,6 +693,28 @@
     </table>
   </modal>
 
+  <!-- Incoming node connection modal -->
+
+  <div id="incomingConnection" class="modal fade" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header alert alert-info">
+        <h4 translate class="modal-title">New Incoming Connection</h4>
+      </div>
+      <div class="modal-body">
+        <p>
+          <span translate>A connection was received from a node with the ID below.</span>
+          <span translate>Do you want to accept the connection and add the new node to the configuration?</span>
+        </p>
+        <pre>{{incomingNodeID}}</pre>
+      </div>
+      <div class="modal-footer">
+        <button ng-click="blockNode()" class="btn btn-danger btn-sm"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Block Node</span></button>
+        <button ng-click="acceptNode()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Add Node</span></button>
+      </div>
+    </div>
+  </div>
+
   <!-- About modal -->
 
   <modal id="about" large="yes" close="yes" status="info" title="About">

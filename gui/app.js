@@ -224,6 +224,15 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         }
     });
 
+    $scope.$on('NodeRejected', function (event, arg) {
+        if (typeof $scope.incomingNodeID !== 'undefined') {
+            // An incoming request is already being processed in the GUI.
+            return;
+        }
+        $scope.incomingNodeID = arg.data.node;
+        $('#incomingConnection').modal();
+    });
+
     $scope.$on('ConfigLoaded', function (event) {
         if ($scope.config.Options.URAccepted === 0) {
             // If usage reporting has been neither accepted nor declined,
@@ -949,6 +958,25 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
 
     $scope.rescanRepo = function (repo) {
         $http.post(urlbase + "/scan?repo=" + encodeURIComponent(repo));
+    };
+
+    // Add the node to the config.
+    $scope.acceptNode = function () {
+        $('#incomingConnection').modal('hide');
+        $scope.config.Nodes.push({
+            NodeID: $scope.incomingNodeID
+        });
+        $scope.saveConfig();
+        delete $scope.incomingNodeID;
+    };
+
+    // Do not add the node, remember to not ask about it again.
+    $scope.blockNode = function () {
+        $('#incomingConnection').modal('hide');
+        $scope.config.BlockedNodes = $scope.config.BlockedNodes || [];
+        $scope.config.BlockedNodes.push($scope.incomingNodeID);
+        $scope.saveConfig();
+        delete $scope.incomingNodeID;
     };
 
     $scope.init();
