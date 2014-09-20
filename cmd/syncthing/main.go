@@ -800,6 +800,15 @@ next:
 			continue
 		}
 
+		for _, blockedNode := range cfg.BlockedNodes {
+			if blockedNode == remoteID {
+				if debugNet {
+					l.Debugln("rejecting connection from blocked node", blockedNode)
+				}
+				continue next
+			}
+		}
+
 		for _, nodeCfg := range cfg.Nodes {
 			if nodeCfg.NodeID == remoteID {
 				// Verify the name on the certificate. By default we set it to

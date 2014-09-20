@@ -30,6 +30,7 @@ type Configuration struct {
 	GUI          GUIConfiguration          `xml:"gui"`
 	Options      OptionsConfiguration      `xml:"options"`
 	XMLName      xml.Name                  `xml:"configuration" json:"-"`
+	BlockedNodes []protocol.NodeID         `xml:"blocked"`
 }
 
 type RepositoryConfiguration struct {
