@@ -37,17 +37,22 @@ type guiError struct {
 }
 
 var (
-	configInSync = true
-	guiErrors    = []guiError{}
-	guiErrorsMut sync.Mutex
-	modt         = time.Now().UTC().Format(http.TimeFormat)
-	eventSub     *events.BufferedSubscription
+	configInSync     = true
+	guiErrors        = []guiError{}
+	guiErrorsMut     sync.Mutex
+	modt             = time.Now().UTC().Format(http.TimeFormat)
+	eventSub         *events.BufferedSubscription
+	rejectedEventSub *events.BufferedSubscription
 )
 
 func init() {
 	l.AddHandler(logger.LevelWarn, showGuiError)
-	sub := events.Default.Subscribe(events.AllEvents)
+	// A subscription for all non-rejection events.
+	sub := events.Default.Subscribe(^events.EventType(events.NodeRejected | events.RepoRejected))
 	eventSub = events.NewBufferedSubscription(sub, 1000)
+	// A subscription for all rejection events, specifically.
+	sub = events.Default.Subscribe(events.NodeRejected | events.RepoRejected | events.Ping)
+	rejectedEventSub = events.NewBufferedSubscription(sub, 10)
 }
 
 func startGUI(cfg config.GUIConfiguration, assetDir string, m *model.Model) error {
@@ -461,8 +466,20 @@ func restGetEvents(w http.ResponseWriter, r *http.Request) {
 	qs := r.URL.Query()
 	sinceStr := qs.Get("since")
 	limitStr := qs.Get("limit")
+	source := qs.Get("source")
 	since, _ := strconv.Atoi(sinceStr)
 	limit, _ := strconv.Atoi(limitStr)
+
+	var sub *events.BufferedSubscription
+	switch source {
+	case "", "default":
+		sub = eventSub
+	case "rejected":
+		sub = rejectedEventSub
+	default:
+		http.Error(w, "no such subscription", 500)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -471,7 +488,7 @@ func restGetEvents(w http.ResponseWriter, r *http.Request) {
 	f := w.(http.Flusher)
 	f.Flush()
 
-	evs := eventSub.Since(since, nil)
+	evs := sub.Since(since, nil)
 	if 0 < limit && limit < len(evs) {
 		evs = evs[len(evs)-limit:]
 	}

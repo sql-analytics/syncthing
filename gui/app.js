@@ -23,7 +23,7 @@ syncthing.config(function ($httpProvider, $translateProvider) {
     });
 });
 
-syncthing.controller('EventCtrl', function ($scope, $http) {
+syncthing.controller('EventCtrl', function ($scope, $http, source, lookBack) {
     $scope.lastEvent = null;
     var lastID = 0;
 
@@ -40,18 +40,16 @@ syncthing.controller('EventCtrl', function ($scope, $http) {
 
         $scope.$emit('UIOnline');
 
-        if (lastID > 0) {
-            data.forEach(function (event) {
-                console.log("event", event.id, event.type, event.data);
-                $scope.$emit(event.type, event);
-            });
-        }
+        data.forEach(function (event) {
+            console.log("event", source, event.id, event.type, event.data);
+            $scope.$emit(event.type, event);
+        });
 
         $scope.lastEvent = data[data.length - 1];
         lastID = $scope.lastEvent.id;
 
         setTimeout(function () {
-            $http.get(urlbase + '/events?since=' + lastID)
+            $http.get(urlbase + '/events?source=' + source + '&since=' + lastID)
                 .success(successFn)
                 .error(errorFn);
         }, 500);
@@ -61,18 +59,18 @@ syncthing.controller('EventCtrl', function ($scope, $http) {
         $scope.$emit('UIOffline');
 
         setTimeout(function () {
-            $http.get(urlbase + '/events?limit=1')
+            $http.get(urlbase + '/events?source=' + source + '&limit=' + lookBack)
                 .success(successFn)
                 .error(errorFn);
         }, 1000);
     };
 
-    $http.get(urlbase + '/events?limit=1')
+    $http.get(urlbase + '/events?source=' + source + '&limit=' + lookBack)
         .success(successFn)
         .error(errorFn);
 });
 
-syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $location) {
+syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $location, $controller) {
     var prevDate = 0;
     var getOK = true;
     var navigatingAway = false;
@@ -94,6 +92,7 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     $scope.seenError = '';
     $scope.upgradeInfo = {};
     $scope.stats = {};
+    $scope.blocked = {};
 
     $http.get(urlbase + "/lang").success(function (langs) {
         // Find the first language in the list provided by the user's browser
@@ -150,6 +149,52 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         'sync': 'download',
         'touch': 'asterisk',
     };
+
+    // ConfigLoaded is emitted when the configuration is first loaded by
+    // init()
+    $scope.$on('ConfigLoaded', function (event) {
+        if ($scope.config.Options.URAccepted === 0) {
+            // If usage reporting has been neither accepted nor declined,
+            // we want to ask the user to make a choice. But we don't want
+            // to bug them during initial setup, so we set a cookie with
+            // the time of the first visit. When that cookie is present
+            // and the time is more than four hours ago, we ask the
+            // question.
+
+            var firstVisit = document.cookie.replace(/(?:(?:^|.*;\s*)firstVisit\s*\=\s*([^;]*).*$)|^.*$/, "$1");
+            if (!firstVisit) {
+                document.cookie = "firstVisit=" + Date.now() + ";max-age=" + 30 * 24 * 3600;
+            } else {
+                if (+firstVisit < Date.now() - 4 * 3600 * 1000) {
+                    $('#ur').modal();
+                }
+            }
+        }
+
+        // Start the event pollers, now that they have a config to relate to.
+
+        $scope.eventsController = $controller('EventCtrl', {
+            $scope: $scope,
+            $http: $http,
+            source: "default",
+            lookBack: 1,
+        });
+
+        $scope.rejectedEventsController = $controller('EventCtrl', {
+            $scope: $scope,
+            $http: $http,
+            source: "rejected",
+            lookBack: 10,
+        });
+    });
+
+    $scope.$on('ConfigSaved', function (event, arg) {
+        updateLocalConfig(arg.data);
+
+        $http.get(urlbase + '/config/sync').success(function (data) {
+            $scope.configInSync = data.configInSync;
+        });
+    });
 
     $scope.$on('UIOnline', function (event, arg) {
         if (online && !restarting) {
@@ -232,7 +277,7 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         }
         for (i = 0; i < $scope.nodes.length; i++) {
             // info the node is already in the config, skip it.
-            if ($scope.nodes[i].NodeID === args.data.node) {
+            if ($scope.nodes[i].NodeID === arg.data.node) {
                 return;
             }
         }
@@ -241,6 +286,11 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     });
 
     $scope.$on('RepoRejected', function (event, arg) {
+        var i, nodeList;
+        if ($scope.blocked[$scope.incomingNodeID] && $scope.blocked[$scope.incomingNodeID][$scope.incomingRepoID]) {
+            // We've already said "ignore"
+            return
+        }
         if (typeof $scope.incomingNodeID !== 'undefined') {
             // An incoming request is already being processed in the GUI.
             return;
@@ -249,37 +299,16 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
             // If the repo is entirely unknown, we don't do anything.
             return;
         }
+        nodeList = $scope.repos[arg.data.repo].Nodes;
+        for (i = 0; i < nodeList.length; i++) {
+            // info the repo is already shared with the node, skip it.
+            if (nodeList[i].NodeID === arg.data.node) {
+                return;
+            }
+        }
         $scope.incomingNodeID = arg.data.node;
         $scope.incomingRepoID = arg.data.repo;
         $('#incomingRepo').modal();
-    });
-
-    $scope.$on('ConfigLoaded', function (event) {
-        if ($scope.config.Options.URAccepted === 0) {
-            // If usage reporting has been neither accepted nor declined,
-            // we want to ask the user to make a choice. But we don't want
-            // to bug them during initial setup, so we set a cookie with
-            // the time of the first visit. When that cookie is present
-            // and the time is more than four hours ago, we ask the
-            // question.
-
-            var firstVisit = document.cookie.replace(/(?:(?:^|.*;\s*)firstVisit\s*\=\s*([^;]*).*$)|^.*$/, "$1");
-            if (!firstVisit) {
-                document.cookie = "firstVisit=" + Date.now() + ";max-age=" + 30 * 24 * 3600;
-            } else {
-                if (+firstVisit < Date.now() - 4 * 3600 * 1000) {
-                    $('#ur').modal();
-                }
-            }
-        }
-    });
-
-    $scope.$on('ConfigSaved', function (event, arg) {
-        updateLocalConfig(arg.data);
-
-        $http.get(urlbase + '/config/sync').success(function (data) {
-            $scope.configInSync = data.configInSync;
-        });
     });
 
     var nextCall = {};
@@ -1010,6 +1039,15 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         $scope.saveConfig();
         delete $scope.incomingNodeID;
         delete $scope.incomingRepoID;
+    };
+
+    // Ignore the "sharing request"
+    $scope.blockRepo = function () {
+        $('#incomingRepo').modal('hide');
+        if (!$scope.blocked[$scope.incomingNodeID]) {
+            $scope.blocked[$scope.incomingNodeID] = {};
+        }
+        $scope.blocked[$scope.incomingNodeID][$scope.incomingRepoID] = true;
     };
 
     $scope.init();

@@ -344,22 +344,23 @@ func (m *Model) Index(nodeID protocol.NodeID, repo string, fs []protocol.FileInf
 		l.Debugf("IDX(in): %s %q: %d files", nodeID, repo, len(fs))
 	}
 
-	if !m.repoSharedWith(repo, nodeID) {
-		events.Default.Log(events.RepoRejected, map[string]string{
-			"repo": repo,
-			"node": nodeID.String(),
-		})
-		l.Warnf("Unexpected repository ID %q sent from node %q; ensure that the repository exists and that this node is selected under \"Share With\" in the repository configuration.", repo, nodeID)
-		return
-	}
-
 	m.rmut.RLock()
 	files, ok := m.repoFiles[repo]
 	ignores, _ := m.repoIgnores[repo]
 	m.rmut.RUnlock()
 
 	if !ok {
-		l.Fatalf("Index for nonexistant repo %q", repo)
+		l.Warnf("Unexpected (nonexistent) repository ID %q sent from node %q; ensure that the repository exists and that this node is selected under \"Share With\" in the repository configuration.", repo, nodeID)
+		return
+	}
+
+	if !m.repoSharedWith(repo, nodeID) {
+		events.Default.Log(events.RepoRejected, map[string]string{
+			"repo": repo,
+			"node": nodeID.String(),
+		})
+		l.Infof("Unexpected repository ID %q sent from node %q; ensure that the repository exists and that this node is selected under \"Share With\" in the repository configuration.", repo, nodeID)
+		return
 	}
 
 	for i := 0; i < len(fs); {
