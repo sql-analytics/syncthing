@@ -16,12 +16,15 @@
 package model
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/AudriusButkevicius/lfu-go"
 
 	"github.com/syncthing/syncthing/internal/config"
 	"github.com/syncthing/syncthing/internal/events"
@@ -50,7 +53,7 @@ type pullBlockState struct {
 }
 
 // A copyBlocksState is passed to copy routine if the file has blocks to be
-// copied from the original.
+// copied.
 type copyBlocksState struct {
 	*sharedPullerState
 	blocks []protocol.BlockInfo
@@ -225,7 +228,7 @@ func (p *Puller) pullerIteration(ncopiers, npullers, nfinishers int) int {
 		wg.Add(1)
 		go func() {
 			// copierRoutine finishes when copyChan is closed
-			p.copierRoutine(copyChan, finisherChan)
+			p.copierRoutine(copyChan, pullChan, finisherChan)
 			wg.Done()
 		}()
 	}
@@ -292,7 +295,7 @@ func (p *Puller) pullerIteration(ncopiers, npullers, nfinishers int) int {
 		default:
 			// A new or changed file. This is the only case where we do stuff
 			// in the background; the other three are done synchronously.
-			p.handleFile(file, copyChan, pullChan, finisherChan)
+			p.handleFile(file, copyChan, finisherChan)
 		}
 
 		changed++
@@ -401,11 +404,15 @@ func (p *Puller) deleteFile(file protocol.FileInfo) {
 
 // handleFile queues the copies and pulls as necessary for a single new or
 // changed file.
-func (p *Puller) handleFile(file protocol.FileInfo, copyChan chan<- copyBlocksState, pullChan chan<- pullBlockState, finisherChan chan<- *sharedPullerState) {
+func (p *Puller) handleFile(file protocol.FileInfo, copyChan chan<- copyBlocksState, finisherChan chan<- *sharedPullerState) {
 	curFile := p.model.CurrentFolderFile(p.folder, file.Name)
-	copyBlocks, pullBlocks := scanner.BlockDiff(curFile.Blocks, file.Blocks)
 
-	if len(copyBlocks) == len(curFile.Blocks) && len(pullBlocks) == 0 {
+	if len(curFile.Blocks) == len(file.Blocks) {
+		for i := range file.Blocks {
+			if !bytes.Equal(curFile.Blocks[i].Hash, file.Blocks[i].Hash) {
+				goto FilesAreDifferent
+			}
+		}
 		// We are supposed to copy the entire file, and then fetch nothing. We
 		// are only updating metadata, so we don't actually *need* to make the
 		// copy.
@@ -416,11 +423,14 @@ func (p *Puller) handleFile(file protocol.FileInfo, copyChan chan<- copyBlocksSt
 		return
 	}
 
+FilesAreDifferent:
+
 	// Figure out the absolute filenames we need once and for all
 	tempName := filepath.Join(p.dir, defTempNamer.TempName(file.Name))
 	realName := filepath.Join(p.dir, file.Name)
 
 	var reuse bool
+	var blocks []protocol.BlockInfo
 
 	// Check for an old temporary file which might have some blocks we could
 	// reuse.
@@ -435,38 +445,26 @@ func (p *Puller) handleFile(file protocol.FileInfo, copyChan chan<- copyBlocksSt
 			existingBlocks[block.String()] = true
 		}
 
-		// Since the blocks are already there, we don't need to copy them
-		// nor we need to pull them, hence discard blocks which are already
-		// there, if they are exactly the same...
-		var newCopyBlocks []protocol.BlockInfo
-		for _, block := range copyBlocks {
+		// Since the blocks are already there, we don't need to get them.
+		for _, block := range file.Blocks {
 			_, ok := existingBlocks[block.String()]
 			if !ok {
-				newCopyBlocks = append(newCopyBlocks, block)
-			}
-		}
-
-		var newPullBlocks []protocol.BlockInfo
-		for _, block := range pullBlocks {
-			_, ok := existingBlocks[block.String()]
-			if !ok {
-				newPullBlocks = append(newPullBlocks, block)
+				blocks = append(blocks, block)
 			}
 		}
 
 		// If any blocks could be reused, let the sharedpullerstate know
 		// which flags it is expected to set on the file.
-		// Also update the list of work for the routines.
-		if len(copyBlocks) != len(newCopyBlocks) || len(pullBlocks) != len(newPullBlocks) {
+		if len(blocks) != len(file.Blocks) {
 			reuse = true
-			copyBlocks = newCopyBlocks
-			pullBlocks = newPullBlocks
 		} else {
 			// Otherwise, discard the file ourselves in order for the
 			// sharedpuller not to panic when it fails to exlusively create a
 			// file which already exists
 			os.Remove(tempName)
 		}
+	} else {
+		blocks = file.Blocks
 	}
 
 	s := sharedPullerState{
@@ -474,36 +472,21 @@ func (p *Puller) handleFile(file protocol.FileInfo, copyChan chan<- copyBlocksSt
 		folder:     p.folder,
 		tempName:   tempName,
 		realName:   realName,
-		pullNeeded: len(pullBlocks),
+		copyNeeded: len(blocks),
 		reuse:      reuse,
-	}
-	if len(copyBlocks) > 0 {
-		s.copyNeeded = 1
 	}
 
 	if debug {
-		l.Debugf("%v need file %s; copy %d, pull %d, reuse %v", p, file.Name, len(copyBlocks), len(pullBlocks), reuse)
+		l.Debugf("%v need file %s; copy %d, reuse %v", p, file.Name, len(blocks), reuse)
 	}
 
-	if len(copyBlocks) > 0 {
+	if len(blocks) > 0 {
 		cs := copyBlocksState{
 			sharedPullerState: &s,
-			blocks:            copyBlocks,
+			blocks:            blocks,
 		}
 		copyChan <- cs
-	}
-
-	if len(pullBlocks) > 0 {
-		for _, block := range pullBlocks {
-			ps := pullBlockState{
-				sharedPullerState: &s,
-				block:             block,
-			}
-			pullChan <- ps
-		}
-	}
-
-	if len(pullBlocks) == 0 && len(copyBlocks) == 0 {
+	} else {
 		if !reuse {
 			panic("bug: nothing to do with file?")
 		}
@@ -535,9 +518,9 @@ func (p *Puller) shortcutFile(file protocol.FileInfo) {
 	p.model.updateLocal(p.folder, file)
 }
 
-// copierRoutine reads pullerStates until the in channel closes and performs
-// the relevant copy.
-func (p *Puller) copierRoutine(in <-chan copyBlocksState, out chan<- *sharedPullerState) {
+// copierRoutine reads copierStates until the in channel closes and performs
+// the relevant copies when possible, or passes it to the puller routine.
+func (p *Puller) copierRoutine(in <-chan copyBlocksState, pull chan<- pullBlockState, out chan<- *sharedPullerState) {
 	buf := make([]byte, protocol.BlockSize)
 
 nextFile:
@@ -549,32 +532,74 @@ nextFile:
 			continue nextFile
 		}
 
-		srcFd, err := state.sourceFile()
-		if err != nil {
-			// As above
-			continue nextFile
-		}
+		evictionChan := make(chan lfu.Eviction)
+
+		fdCache := lfu.New()
+		fdCache.UpperBound = 50
+		fdCache.LowerBound = 20
+		fdCache.EvictionChannel = evictionChan
+
+		go func() {
+			for item := range evictionChan {
+				item.Value.(*os.File).Close()
+			}
+		}()
+
+		wg := sync.WaitGroup{}
 
 		for _, block := range state.blocks {
 			buf = buf[:int(block.Size)]
 
-			_, err = srcFd.ReadAt(buf, block.Offset)
-			if err != nil {
-				state.earlyClose("src read", err)
-				srcFd.Close()
-				continue nextFile
+			success := p.model.finder.Iterate(block.Hash, func(folder, file string, index uint32) bool {
+				path := filepath.Join(p.model.folderCfgs[folder].Path, file)
+
+				var fd *os.File
+
+				fdi := fdCache.Get(path)
+				if fdi != nil {
+					fd = fdi.(*os.File)
+				} else {
+					fd, err = os.Open(path)
+					if err != nil {
+						return false
+					}
+					fdCache.Set(path, fd)
+				}
+
+				_, err = fd.ReadAt(buf, protocol.BlockSize*int64(index))
+				if err != nil {
+					return false
+				}
+
+				_, err = dstFd.WriteAt(buf, block.Offset)
+				if err != nil {
+					state.earlyClose("dst write", err)
+				}
+				return true
+			})
+
+			if state.failed() != nil {
+				break
 			}
 
-			_, err = dstFd.WriteAt(buf, block.Offset)
-			if err != nil {
-				state.earlyClose("dst write", err)
-				srcFd.Close()
-				continue nextFile
+			if !success {
+				state.pullStarted()
+				wg.Add(1)
+				blk := block // Copy the value, as loop variable will change
+				go func() {
+					ps := pullBlockState{
+						sharedPullerState: state.sharedPullerState,
+						block:             blk,
+					}
+					pull <- ps
+					wg.Done()
+				}()
 			}
+			state.copyDone()
 		}
-
-		srcFd.Close()
-		state.copyDone()
+		fdCache.Evict(fdCache.Len())
+		close(evictionChan)
+		wg.Wait()
 		out <- state.sharedPullerState
 	}
 }
