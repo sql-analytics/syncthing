@@ -429,7 +429,7 @@ FilesAreDifferent:
 	tempName := filepath.Join(p.dir, defTempNamer.TempName(file.Name))
 	realName := filepath.Join(p.dir, file.Name)
 
-	var reuse bool
+	reused := 0
 	var blocks []protocol.BlockInfo
 
 	// Check for an old temporary file which might have some blocks we could
@@ -453,11 +453,10 @@ FilesAreDifferent:
 			}
 		}
 
-		// If any blocks could be reused, let the sharedpullerstate know
-		// which flags it is expected to set on the file.
-		if len(blocks) != len(file.Blocks) {
-			reuse = true
-		} else {
+		// The sharedpullerstate will know which flags to use when opening the
+		// temp file depending if we are reusing any blocks or not.
+		reused = len(file.Blocks) - len(blocks)
+		if reused == 0 {
 			// Otherwise, discard the file ourselves in order for the
 			// sharedpuller not to panic when it fails to exlusively create a
 			// file which already exists
@@ -472,12 +471,13 @@ FilesAreDifferent:
 		folder:     p.folder,
 		tempName:   tempName,
 		realName:   realName,
+		copyTotal:  len(blocks),
 		copyNeeded: len(blocks),
-		reuse:      reuse,
+		reused:     reused,
 	}
 
 	if debug {
-		l.Debugf("%v need file %s; copy %d, reuse %v", p, file.Name, len(blocks), reuse)
+		l.Debugf("%v need file %s; copy %d, reused %v", p, file.Name, len(blocks), reused)
 	}
 
 	if len(blocks) > 0 {
@@ -487,7 +487,7 @@ FilesAreDifferent:
 		}
 		copyChan <- cs
 	} else {
-		if !reuse {
+		if reused == 0 {
 			panic("bug: nothing to do with file?")
 		}
 		// We have a temp file that we can reuse totally. Jump directly to the
@@ -575,6 +575,9 @@ nextFile:
 				if err != nil {
 					state.earlyClose("dst write", err)
 				}
+				if file == state.file.Name {
+					state.copiedFromOrigin()
+				}
 				return true
 			})
 
@@ -594,8 +597,9 @@ nextFile:
 					pull <- ps
 					wg.Done()
 				}()
+			} else {
+				state.copyDone()
 			}
-			state.copyDone()
 		}
 		fdCache.Evict(fdCache.Len())
 		close(evictionChan)
