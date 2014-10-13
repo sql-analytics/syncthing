@@ -221,33 +221,34 @@ func (p *Puller) pullerIteration(ncopiers, npullers, nfinishers int) int {
 	copyChan := make(chan copyBlocksState)
 	finisherChan := make(chan *sharedPullerState)
 
-	var wg sync.WaitGroup
-	var doneWg sync.WaitGroup
+	var copyWg sync.WaitGroup
+	var pullWg sync.WaitGroup
+	var finisherWg sync.WaitGroup
 
 	for i := 0; i < ncopiers; i++ {
-		wg.Add(1)
+		copyWg.Add(1)
 		go func() {
 			// copierRoutine finishes when copyChan is closed
 			p.copierRoutine(copyChan, pullChan, finisherChan)
-			wg.Done()
+			copyWg.Done()
 		}()
 	}
 
 	for i := 0; i < npullers; i++ {
-		wg.Add(1)
+		pullWg.Add(1)
 		go func() {
 			// pullerRoutine finishes when pullChan is closed
 			p.pullerRoutine(pullChan, finisherChan)
-			wg.Done()
+			pullWg.Done()
 		}()
 	}
 
 	for i := 0; i < nfinishers; i++ {
-		doneWg.Add(1)
+		finisherWg.Add(1)
 		// finisherRoutine finishes when finisherChan is closed
 		go func() {
 			p.finisherRoutine(finisherChan)
-			doneWg.Done()
+			finisherWg.Done()
 		}()
 	}
 
@@ -305,19 +306,25 @@ func (p *Puller) pullerIteration(ncopiers, npullers, nfinishers int) int {
 	// Signal copy and puller routines that we are done with the in data for
 	// this iteration
 	close(copyChan)
-	close(pullChan)
+	copyWg.Wait()
 
-	// Wait for them to finish, then signal the finisher chan that there will
-	// be no more input.
-	wg.Wait()
+	// Copiers write to pullers, so now that they're done, we can stop the pullers.
+	close(pullChan)
+	pullWg.Wait()
+
+	// Signal the finisher chan that there will
+	// be no more input, when the pullers are done..
 	close(finisherChan)
 
 	// Wait for the finisherChan to finish.
-	doneWg.Wait()
+	finisherWg.Wait()
 
-	for _, deletion := range deletions {
+	for i := range deletions {
+		// Process the deletions in reverse order, to get files before their
+		// containing directory
+		deletion := deletions[len(deletions)-i]
 		if deletion.IsDirectory() {
-			defer p.deleteDir(deletion)
+			p.deleteDir(deletion)
 		} else {
 			p.deleteFile(deletion)
 		}
