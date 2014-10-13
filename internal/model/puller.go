@@ -553,8 +553,6 @@ nextFile:
 			}
 		}()
 
-		wg := sync.WaitGroup{}
-
 		for _, block := range state.blocks {
 			buf = buf[:int(block.Size)]
 
@@ -595,23 +593,17 @@ nextFile:
 
 			if !success {
 				state.pullStarted()
-				wg.Add(1)
-				blk := block // Copy the value, as loop variable will change
-				go func() {
-					ps := pullBlockState{
-						sharedPullerState: state.sharedPullerState,
-						block:             blk,
-					}
-					pull <- ps
-					wg.Done()
-				}()
+				ps := pullBlockState{
+					sharedPullerState: state.sharedPullerState,
+					block:             block,
+				}
+				pull <- ps
 			} else {
 				state.copyDone()
 			}
 		}
 		fdCache.Evict(fdCache.Len())
 		close(evictionChan)
-		wg.Wait()
 		out <- state.sharedPullerState
 	}
 }
