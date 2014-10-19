@@ -35,8 +35,8 @@ type Walker struct {
 	Sub string
 	// BlockSize controls the size of the block used when hashing.
 	BlockSize int
-	// List of patterns to ignore
-	Ignores ignore.Patterns
+	// If Matcher is not nil, it is used to identify files to ignore which were specified by the user.
+	Matcher *ignore.Matcher
 	// If TempNamer is not nil, it is used to ignore tempory files when walking.
 	TempNamer TempNamer
 	// If CurrentFiler is not nil, it is queried for the current file before rescanning.
@@ -63,7 +63,7 @@ type CurrentFiler interface {
 // file system. Files are blockwise hashed.
 func (w *Walker) Walk() (chan protocol.FileInfo, error) {
 	if debug {
-		l.Debugln("Walk", w.Dir, w.Sub, w.BlockSize, w.Ignores)
+		l.Debugln("Walk", w.Dir, w.Sub, w.BlockSize, w.Matcher)
 	}
 
 	err := checkDir(w.Dir)
@@ -113,7 +113,8 @@ func (w *Walker) walkAndHashFiles(fchan chan protocol.FileInfo) filepath.WalkFun
 			return nil
 		}
 
-		if sn := filepath.Base(rn); sn == ".stignore" || sn == ".stversions" || w.Ignores.Match(rn) {
+		if sn := filepath.Base(rn); sn == ".stignore" || sn == ".stversions" ||
+			sn == ".stfolder" || (w.Matcher != nil && w.Matcher.Match(rn)) {
 			// An ignored file
 			if debug {
 				l.Debugln("ignored:", rn)
@@ -151,7 +152,7 @@ func (w *Walker) walkAndHashFiles(fchan chan protocol.FileInfo) filepath.WalkFun
 				Modified: info.ModTime().Unix(),
 			}
 			if debug {
-				l.Debugln("dir:", f)
+				l.Debugln("dir:", p, f)
 			}
 			fchan <- f
 			return nil
@@ -175,12 +176,16 @@ func (w *Walker) walkAndHashFiles(fchan chan protocol.FileInfo) filepath.WalkFun
 				flags = protocol.FlagNoPermBits | 0666
 			}
 
-			fchan <- protocol.FileInfo{
+			f := protocol.FileInfo{
 				Name:     rn,
 				Version:  lamport.Default.Tick(0),
 				Flags:    flags,
 				Modified: info.ModTime().Unix(),
 			}
+			if debug {
+				l.Debugln("to hash:", p, f)
+			}
+			fchan <- f
 		}
 
 		return nil

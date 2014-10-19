@@ -16,17 +16,27 @@
 package upnp
 
 import (
-	"os"
+	"encoding/xml"
 	"testing"
 )
 
-func TestGetTechnicolorRootURL(t *testing.T) {
-	r, _ := os.Open("testdata/technicolor.xml")
-	_, action, err := getServiceURLReader("http://localhost:1234/", r)
+func TestExternalIPParsing(t *testing.T) {
+	soap_response :=
+		[]byte(`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+		<s:Body>
+			<u:GetExternalIPAddressResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+			<NewExternalIPAddress>1.2.3.4</NewExternalIPAddress>
+			</u:GetExternalIPAddressResponse>
+		</s:Body>
+		</s:Envelope>`)
+
+	envelope := &soapGetExternalIPAddressResponseEnvelope{}
+	err := xml.Unmarshal(soap_response, envelope)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
-	if action != "urn:schemas-upnp-org:service:WANPPPConnection:1" {
-		t.Error("Unexpected action", action)
+
+	if envelope.Body.GetExternalIPAddressResponse.NewExternalIPAddress != "1.2.3.4" {
+		t.Error("Parse of SOAP request failed.")
 	}
 }

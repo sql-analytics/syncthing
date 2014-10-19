@@ -81,8 +81,9 @@ type service interface {
 }
 
 type Model struct {
-	cfg *config.ConfigWrapper
-	db  *leveldb.DB
+	cfg    *config.ConfigWrapper
+	db     *leveldb.DB
+	finder *files.BlockFinder
 
 	deviceName    string
 	clientName    string
@@ -93,7 +94,7 @@ type Model struct {
 	folderDevices  map[string][]protocol.DeviceID                         // folder -> deviceIDs
 	deviceFolders  map[protocol.DeviceID][]string                         // deviceID -> folders
 	deviceStatRefs map[protocol.DeviceID]*stats.DeviceStatisticsReference // deviceID -> statsRef
-	folderIgnores  map[string]ignore.Patterns                             // folder -> list of ignore patterns
+	folderIgnores  map[string]*ignore.Matcher                             // folder -> matcher object
 	folderRunners  map[string]service                                     // folder -> puller or scanner
 	fmut           sync.RWMutex                                           // protects the above
 
@@ -130,13 +131,14 @@ func NewModel(cfg *config.ConfigWrapper, deviceName, clientName, clientVersion s
 		folderDevices:      make(map[string][]protocol.DeviceID),
 		deviceFolders:      make(map[protocol.DeviceID][]string),
 		deviceStatRefs:     make(map[protocol.DeviceID]*stats.DeviceStatisticsReference),
-		folderIgnores:      make(map[string]ignore.Patterns),
+		folderIgnores:      make(map[string]*ignore.Matcher),
 		folderRunners:      make(map[string]service),
 		folderState:        make(map[string]folderState),
 		folderStateChanged: make(map[string]time.Time),
 		protoConn:          make(map[protocol.DeviceID]protocol.Connection),
 		rawConn:            make(map[protocol.DeviceID]io.Closer),
 		deviceVer:          make(map[protocol.DeviceID]string),
+		finder:             files.NewBlockFinder(db, cfg),
 	}
 
 	var timeout = 20 * 60 // seconds
@@ -167,11 +169,12 @@ func (m *Model) StartFolderRW(folder string) {
 		panic("cannot start already running folder " + folder)
 	}
 	p := &Puller{
-		folder:      folder,
-		dir:         cfg.Path,
-		scanIntv:    time.Duration(cfg.RescanIntervalS) * time.Second,
-		model:       m,
-		ignorePerms: cfg.IgnorePerms,
+		folder:        folder,
+		dir:           cfg.Path,
+		scanIntv:      time.Duration(cfg.RescanIntervalS) * time.Second,
+		model:         m,
+		ignorePerms:   cfg.IgnorePerms,
+		lenientMtimes: cfg.LenientMtimes,
 	}
 	m.folderRunners[folder] = p
 	m.fmut.Unlock()
@@ -182,6 +185,10 @@ func (m *Model) StartFolderRW(folder string) {
 			l.Fatalf("Requested versioning type %q that does not exist", cfg.Versioning.Type)
 		}
 		p.versioner = factory(folder, cfg.Path, cfg.Versioning.Params)
+	}
+
+	if cfg.LenientMtimes {
+		l.Infof("Folder %q is running with LenientMtimes workaround. Syncing may not work properly.", folder)
 	}
 
 	go p.Serve()
@@ -266,6 +273,8 @@ func (m *Model) DeviceStatistics() map[string]stats.DeviceStatistics {
 
 // Returns the completion status, in percent, for the given device and folder.
 func (m *Model) Completion(device protocol.DeviceID, folder string) float64 {
+	defer m.leveldbPanicWorkaround()
+
 	var tot int64
 
 	m.fmut.RLock()
@@ -325,6 +334,8 @@ func sizeOfFile(f protocol.FileIntf) (files, deleted int, bytes int64) {
 // GlobalSize returns the number of files, deleted files and total bytes for all
 // files in the global model.
 func (m *Model) GlobalSize(folder string) (files, deleted int, bytes int64) {
+	defer m.leveldbPanicWorkaround()
+
 	m.fmut.RLock()
 	defer m.fmut.RUnlock()
 	if rf, ok := m.folderFiles[folder]; ok {
@@ -342,6 +353,8 @@ func (m *Model) GlobalSize(folder string) (files, deleted int, bytes int64) {
 // LocalSize returns the number of files, deleted files and total bytes for all
 // files in the local folder.
 func (m *Model) LocalSize(folder string) (files, deleted int, bytes int64) {
+	defer m.leveldbPanicWorkaround()
+
 	m.fmut.RLock()
 	defer m.fmut.RUnlock()
 	if rf, ok := m.folderFiles[folder]; ok {
@@ -361,6 +374,8 @@ func (m *Model) LocalSize(folder string) (files, deleted int, bytes int64) {
 
 // NeedSize returns the number and total size of currently needed files.
 func (m *Model) NeedSize(folder string) (files int, bytes int64) {
+	defer m.leveldbPanicWorkaround()
+
 	m.fmut.RLock()
 	defer m.fmut.RUnlock()
 	if rf, ok := m.folderFiles[folder]; ok {
@@ -380,6 +395,8 @@ func (m *Model) NeedSize(folder string) (files int, bytes int64) {
 // NeedFiles returns the list of currently needed files, stopping at maxFiles
 // files or maxBlocks blocks. Limits <= 0 are ignored.
 func (m *Model) NeedFolderFilesLimited(folder string, maxFiles, maxBlocks int) []protocol.FileInfo {
+	defer m.leveldbPanicWorkaround()
+
 	m.fmut.RLock()
 	defer m.fmut.RUnlock()
 	nblocks := 0
@@ -423,7 +440,10 @@ func (m *Model) Index(deviceID protocol.DeviceID, folder string, fs []protocol.F
 
 	for i := 0; i < len(fs); {
 		lamport.Default.Tick(fs[i].Version)
-		if ignores.Match(fs[i].Name) {
+		if ignores != nil && ignores.Match(fs[i].Name) {
+			if debug {
+				l.Debugln("dropping update for ignored", fs[i])
+			}
 			fs[i] = fs[len(fs)-1]
 			fs = fs[:len(fs)-1]
 		} else {
@@ -464,7 +484,10 @@ func (m *Model) IndexUpdate(deviceID protocol.DeviceID, folder string, fs []prot
 
 	for i := 0; i < len(fs); {
 		lamport.Default.Tick(fs[i].Version)
-		if ignores.Match(fs[i].Name) {
+		if ignores != nil && ignores.Match(fs[i].Name) {
+			if debug {
+				l.Debugln("dropping update for ignored", fs[i])
+			}
 			fs[i] = fs[len(fs)-1]
 			fs = fs[:len(fs)-1]
 		} else {
@@ -538,6 +561,7 @@ func (m *Model) ClusterConfig(deviceID protocol.DeviceID, cm protocol.ClusterCon
 					newDeviceCfg := config.DeviceConfiguration{
 						DeviceID:    id,
 						Compression: true,
+						Addresses:   []string{"dynamic"},
 					}
 
 					// The introducers' introducers are also our introducers.
@@ -819,7 +843,7 @@ func (m *Model) deviceWasSeen(deviceID protocol.DeviceID) {
 	m.deviceStatRef(deviceID).WasSeen()
 }
 
-func sendIndexes(conn protocol.Connection, folder string, fs *files.Set, ignores ignore.Patterns) {
+func sendIndexes(conn protocol.Connection, folder string, fs *files.Set, ignores *ignore.Matcher) {
 	deviceID := conn.ID()
 	name := conn.Name()
 	var err error
@@ -844,7 +868,7 @@ func sendIndexes(conn protocol.Connection, folder string, fs *files.Set, ignores
 	}
 }
 
-func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, folder string, fs *files.Set, ignores ignore.Patterns) (uint64, error) {
+func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, folder string, fs *files.Set, ignores *ignore.Matcher) (uint64, error) {
 	deviceID := conn.ID()
 	name := conn.Name()
 	batch := make([]protocol.FileInfo, 0, indexBatchSize)
@@ -862,7 +886,10 @@ func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, fol
 			maxLocalVer = f.LocalVersion
 		}
 
-		if ignores.Match(f.Name) {
+		if ignores != nil && ignores.Match(f.Name) {
+			if debug {
+				l.Debugln("not sending update for ignored", f)
+			}
 			return true
 		}
 
@@ -996,13 +1023,13 @@ func (m *Model) ScanFolderSub(folder, sub string) error {
 	fs, ok := m.folderFiles[folder]
 	dir := m.folderCfgs[folder].Path
 
-	ignores, _ := ignore.Load(filepath.Join(dir, ".stignore"))
+	ignores, _ := ignore.Load(filepath.Join(dir, ".stignore"), m.cfg.Options().CacheIgnoredFiles)
 	m.folderIgnores[folder] = ignores
 
 	w := &scanner.Walker{
 		Dir:          dir,
 		Sub:          sub,
-		Ignores:      ignores,
+		Matcher:      ignores,
 		BlockSize:    protocol.BlockSize,
 		TempNamer:    defTempNamer,
 		CurrentFiler: cFiler{m, folder},
@@ -1062,8 +1089,9 @@ func (m *Model) ScanFolderSub(folder, sub string) error {
 				batch = batch[:0]
 			}
 
-			if ignores.Match(f.Name) {
+			if ignores != nil && ignores.Match(f.Name) {
 				// File has been ignored. Set invalid bit.
+				l.Debugln("setting invalid bit on ignored", f)
 				nf := protocol.FileInfo{
 					Name:     f.Name,
 					Flags:    f.Flags | protocol.FlagInvalid,
@@ -1258,4 +1286,25 @@ func (m *Model) availability(folder string, file string) []protocol.DeviceID {
 
 func (m *Model) String() string {
 	return fmt.Sprintf("model@%p", m)
+}
+
+func (m *Model) leveldbPanicWorkaround() {
+	// When an inconsistency is detected in leveldb we panic(). This is
+	// appropriate because it should never happen, but currently it does for
+	// some reason. However it only seems to trigger in the asynchronous full-
+	// database scans that happen due to REST and usage-reporting calls. In
+	// those places we defer to this workaround to catch the panic instead of
+	// taking down syncthing.
+
+	// This is just a band-aid and should be removed as soon as we have found
+	// a real root cause.
+
+	if pnc := recover(); pnc != nil {
+		if err, ok := pnc.(error); ok && strings.Contains(err.Error(), "leveldb") {
+			l.Infoln("recovered:", err)
+		} else {
+			// Any non-leveldb error is genuine and should continue panicing.
+			panic(err)
+		}
+	}
 }

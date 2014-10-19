@@ -54,6 +54,10 @@ func (f FileInfo) IsInvalid() bool {
 	return IsInvalid(f.Flags)
 }
 
+func (f FileInfo) IsDirectory() bool {
+	return IsDirectory(f.Flags)
+}
+
 // Used for unmarshalling a FileInfo structure but skipping the actual block list
 type FileInfoTruncated struct {
 	Name         string // max:8192
@@ -62,6 +66,11 @@ type FileInfoTruncated struct {
 	Version      uint64
 	LocalVersion uint64
 	NumBlocks    uint32
+}
+
+func (f FileInfoTruncated) String() string {
+	return fmt.Sprintf("File{Name:%q, Flags:0%o, Modified:%d, Version:%d, Size:%d, NumBlocks:%d}",
+		f.Name, f.Flags, f.Modified, f.Version, f.Size(), f.NumBlocks)
 }
 
 // Returns a statistical guess on the size, not the exact figure

@@ -30,7 +30,7 @@ go build json.go
 start() {
 	echo "Starting..."
 	for i in 1 2 3 ; do
-		STTRACE=model,scanner STPROFILER=":909$i" syncthing -home "h$i" > "$i.out" 2>&1 &
+		STTRACE=model,scanner STPROFILER=":909$i" ../bin/syncthing -home "h$i" > "$i.out" 2>&1 &
 	done
 }
 
@@ -64,7 +64,7 @@ testConvergence() {
 
 	for i in 1 2 3 12-1 12-2 23-2 23-3; do
 		pushd "s$i" >/dev/null
-		../md5r -l | sort | grep -v .stversions > ../md5-$i
+		../md5r -l | sort | grep -v .stversions | grep -v .stfolder > ../md5-$i
 		popd >/dev/null
 	done
 
@@ -112,6 +112,7 @@ alterFiles() {
 			set +o pipefail
 			find . -type f \
 				| grep -v timechanged \
+				| grep -v .stfolder \
 				| sort -k 1.16 \
 				| head -n "$todelete" \
 				| xargs rm -f
@@ -126,7 +127,7 @@ alterFiles() {
 		chmod 500 ro-test
 		touch "timechanged-$i"
 
-		../md5r -l | sort | grep -v .stversions > ../md5-$i
+		../md5r -l | sort | grep -v .stversions | grep -v .stfolder > ../md5-$i
 		popd >/dev/null
 	done
 
@@ -157,7 +158,7 @@ done
 echo "MD5-summing..."
 for i in 1 12-2 23-3 ; do
 	pushd "s$i" >/dev/null
-	../md5r -l | sort > ../md5-$i
+	../md5r -l | grep -v .stfolder | sort > ../md5-$i
 	popd >/dev/null
 done
 

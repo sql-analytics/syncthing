@@ -35,6 +35,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -42,6 +43,7 @@ var (
 	goarch    string
 	goos      string
 	noupgrade bool
+	version   string
 )
 
 const minGoVersion = 1.3
@@ -64,6 +66,7 @@ func main() {
 	flag.StringVar(&goarch, "goarch", runtime.GOARCH, "GOARCH")
 	flag.StringVar(&goos, "goos", runtime.GOOS, "GOOS")
 	flag.BoolVar(&noupgrade, "no-upgrade", false, "Disable upgrade functionality")
+	flag.StringVar(&version, "version", getVersion(), "Set compiled in version string")
 	flag.Parse()
 
 	switch goarch {
@@ -280,7 +283,7 @@ func clean() {
 func ldflags() string {
 	var b bytes.Buffer
 	b.WriteString("-w")
-	b.WriteString(fmt.Sprintf(" -X main.Version %s", version()))
+	b.WriteString(fmt.Sprintf(" -X main.Version %s", version))
 	b.WriteString(fmt.Sprintf(" -X main.BuildStamp %d", buildStamp()))
 	b.WriteString(fmt.Sprintf(" -X main.BuildUser %s", buildUser()))
 	b.WriteString(fmt.Sprintf(" -X main.BuildHost %s", buildHost()))
@@ -298,8 +301,11 @@ func rmr(paths ...string) {
 	}
 }
 
-func version() string {
-	v := run("git", "describe", "--always", "--dirty")
+func getVersion() string {
+	v, err := runError("git", "describe", "--always", "--dirty")
+	if err != nil {
+		return "unknown-dev"
+	}
 	v = versionRe.ReplaceAllFunc(v, func(s []byte) []byte {
 		s[0] = '+'
 		return s
@@ -308,7 +314,10 @@ func version() string {
 }
 
 func buildStamp() int64 {
-	bs := run("git", "show", "-s", "--format=%ct")
+	bs, err := runError("git", "show", "-s", "--format=%ct")
+	if err != nil {
+		return time.Now().Unix()
+	}
 	s, _ := strconv.ParseInt(string(bs), 10, 64)
 	return s
 }
@@ -345,18 +354,26 @@ func buildArch() string {
 }
 
 func archiveName() string {
-	return fmt.Sprintf("syncthing-%s-%s", buildArch(), version())
+	return fmt.Sprintf("syncthing-%s-%s", buildArch(), version)
 }
 
 func run(cmd string, args ...string) []byte {
-	ecmd := exec.Command(cmd, args...)
-	bs, err := ecmd.CombinedOutput()
+	bs, err := runError(cmd, args...)
 	if err != nil {
 		log.Println(cmd, strings.Join(args, " "))
 		log.Println(string(bs))
 		log.Fatal(err)
 	}
 	return bytes.TrimSpace(bs)
+}
+
+func runError(cmd string, args ...string) ([]byte, error) {
+	ecmd := exec.Command(cmd, args...)
+	bs, err := ecmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	return bytes.TrimSpace(bs), nil
 }
 
 func runPrint(cmd string, args ...string) {

@@ -58,7 +58,7 @@ func init() {
 }
 
 func TestWalkSub(t *testing.T) {
-	ignores, err := ignore.Load("testdata/.stignore")
+	ignores, err := ignore.Load("testdata/.stignore", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestWalkSub(t *testing.T) {
 		Dir:       "testdata",
 		Sub:       "dir2",
 		BlockSize: 128 * 1024,
-		Ignores:   ignores,
+		Matcher:   ignores,
 	}
 	fchan, err := w.Walk()
 	var files []protocol.FileInfo
@@ -93,7 +93,7 @@ func TestWalkSub(t *testing.T) {
 }
 
 func TestWalk(t *testing.T) {
-	ignores, err := ignore.Load("testdata/.stignore")
+	ignores, err := ignore.Load("testdata/.stignore", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestWalk(t *testing.T) {
 	w := Walker{
 		Dir:       "testdata",
 		BlockSize: 128 * 1024,
-		Ignores:   ignores,
+		Matcher:   ignores,
 	}
 
 	fchan, err := w.Walk()

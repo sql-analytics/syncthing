@@ -188,7 +188,7 @@
         <div class="panel panel-default" ng-repeat="deviceCfg in [thisDevice()]">
           <div class="panel-heading" data-toggle="collapse" href="#device-this" style="cursor: pointer">
             <h3 class="panel-title">
-              <span class="glyphicon glyphicon-home"></span>&emsp;{{deviceName(deviceCfg)}}
+              <identicon data-value="deviceCfg.DeviceID"></identicon>&emsp;{{deviceName(deviceCfg)}}
             </h3>
           </div>
           <div id="device-this" class="panel-collapse collapse in">
@@ -234,7 +234,7 @@
           <div class="panel panel-{{deviceClass(deviceCfg)}}" ng-repeat="deviceCfg in otherDevices()">
             <div class="panel-heading" data-toggle="collapse" data-parent="#devices" href="#device-{{$index}}" style="cursor: pointer">
               <h3 class="panel-title">
-                <span class="glyphicon glyphicon-retweet"></span>&emsp;{{deviceName(deviceCfg)}}
+                <identicon data-value="deviceCfg.DeviceID"></identicon>&emsp;{{deviceName(deviceCfg)}}
                 <span class="pull-right hidden-xs">
                   <span ng-if="connections[deviceCfg.DeviceID] && completion[deviceCfg.DeviceID]._total == 100">
                     <span translate>Up to Date</span> (100%)
@@ -381,7 +381,10 @@
           <form role="form" name="deviceEditor">
             <div class="form-group" ng-class="{'has-error': deviceEditor.deviceID.$invalid && deviceEditor.deviceID.$dirty}">
               <label translate for="deviceID">Device ID</label>
-              <input ng-if="!editingExisting" name="deviceID" id="deviceID" class="form-control text-monospace" type="text" ng-model="currentDevice.DeviceID" required valid-deviceid></input>
+              <input ng-if="!editingExisting" name="deviceID" id="deviceID" class="form-control text-monospace" type="text" ng-model="currentDevice.DeviceID" required valid-deviceid list="discovery-list" />
+              <datalist id="discovery-list" ng-if="!editingExisting">
+                <option ng-repeat="(id,address) in discovery" value="{{ id }}" />
+              </datalist>
               <div ng-if="editingExisting" class="well well-sm text-monospace">{{currentDevice.DeviceID}}</div>
               <p class="help-block">
                 <span translate ng-if="deviceEditor.deviceID.$valid || deviceEditor.deviceID.$pristine">The device ID to enter here can be found in the "Edit > Show ID" dialog on the other device. Spaces and dashes are optional (ignored).</span>
@@ -443,7 +446,7 @@
               <div class="col-md-12">
                 <div class="form-group" ng-class="{'has-error': folderEditor.folderID.$invalid && folderEditor.folderID.$dirty}">
                   <label for="folderID"><span translate>Folder ID</span></label>
-                  <input name="folderID" ng-disabled="editingExisting" id="folderID" class="form-control" type="text" ng-model="currentFolder.ID" required unique-folder ng-pattern="/^[a-zA-Z0-9-_.]{1,64}$/"></input>
+                  <input name="folderID" ng-readonly="editingExisting" id="folderID" class="form-control" type="text" ng-model="currentFolder.ID" required unique-folder ng-pattern="/^[a-zA-Z0-9-_.]{1,64}$/"></input>
                   <p class="help-block">
                     <span translate ng-if="folderEditor.folderID.$valid || folderEditor.folderID.$pristine">Short identifier for the folder. Must be the same on all cluster devices.</span>
                     <span translate ng-if="folderEditor.folderID.$error.uniqueFolder">The folder ID must be unique.</span>
@@ -453,7 +456,7 @@
                 </div>
                 <div class="form-group" ng-class="{'has-error': folderEditor.folderPath.$invalid && folderEditor.folderPath.$dirty}">
                   <label translate for="folderPath">Folder Path</label>
-                  <input name="folderPath" ng-disabled="editingExisting" id="folderPath" class="form-control" type="text" ng-model="currentFolder.Path" required></input>
+                  <input name="folderPath" ng-readonly="editingExisting" id="folderPath" class="form-control" type="text" ng-model="currentFolder.Path" required></input>
                   <p class="help-block">
                     <span translate ng-if="folderEditor.folderPath.$valid || folderEditor.folderPath.$pristine">Path to the folder on the local computer. Will be created if it does not exist. The tilde character (~) can be used as a shortcut for</span> <code>{{system.tilde}}</code>.
                     <span translate ng-if="folderEditor.folderPath.$error.required && folderEditor.folderPath.$dirty">The folder path cannot be blank.</span>
@@ -836,18 +839,24 @@
           <li>Audrius Butkevicius</li>
           <li>Ben Sidhom</li>
           <li>Brandon Philips</li>
-          <li>Gilli Sigurdsson</li>
-          <li>James Patterson</li>
+          <li>Caleb Callaway</li>
+          <li>Chris Joel</li>
+          <li>Daniel Martí</li>
+          <li>Felix Ableitner</li>
+          <li>Felix Unterpaintner</li>
         </ul>
       </div>
       <div class="col-md-6">
         <ul>
+          <li>Gilli Sigurdsson</li>
+          <li>James Patterson</li>
           <li>Jens Diemer</li>
           <li>Jochen Voss</li>
           <li>Lode Hoste</li>
           <li>Marcin Dziadus</li>
           <li>Michael Tilli</li>
           <li>Philippe Schommers</li>
+          <li>Phill Luby</li>
           <li>Ryan Sullivan</li>
           <li>Tully Robinson</li>
           <li>Veeti Paananen</li>
@@ -869,7 +878,6 @@
       <li><a href="http://getbootstrap.com/">Bootstrap</a>, Copyright &copy; 2011-2014 Twitter, Inc.</li>
     </ul>
   </modal>
-
 
   <script src="angular/angular.min.js"></script>
   <script src="angular/angular-translate.min.js"></script>

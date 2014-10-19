@@ -21,18 +21,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 
 	"code.google.com/p/go.crypto/bcrypt"
 	"github.com/syncthing/syncthing/internal/logger"
+	"github.com/syncthing/syncthing/internal/osutil"
 	"github.com/syncthing/syncthing/internal/protocol"
 )
 
 var l = logger.DefaultLogger
 
-const CurrentVersion = 5
+const CurrentVersion = 6
 
 type Configuration struct {
 	Version        int                   `xml:"version,attr"`
@@ -56,6 +58,7 @@ type FolderConfiguration struct {
 	RescanIntervalS int                         `xml:"rescanIntervalS,attr" default:"60"`
 	IgnorePerms     bool                        `xml:"ignorePerms,attr"`
 	Versioning      VersioningConfiguration     `xml:"versioning"`
+	LenientMtimes   bool                        `xml:"lenientMtimes"`
 
 	Invalid string `xml:"-"` // Set at runtime when there is an error, not saved
 
@@ -63,6 +66,28 @@ type FolderConfiguration struct {
 
 	Deprecated_Directory string                      `xml:"directory,omitempty,attr" json:"-"`
 	Deprecated_Nodes     []FolderDeviceConfiguration `xml:"node" json:"-"`
+}
+
+func (f *FolderConfiguration) CreateMarker() error {
+	if !f.HasMarker() {
+		marker := filepath.Join(f.Path, ".stfolder")
+		fd, err := os.Create(marker)
+		if err != nil {
+			return err
+		}
+		fd.Close()
+		osutil.HideFile(marker)
+	}
+
+	return nil
+}
+
+func (f *FolderConfiguration) HasMarker() bool {
+	_, err := os.Stat(filepath.Join(f.Path, ".stfolder"))
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 func (r *FolderConfiguration) DeviceIDs() []protocol.DeviceID {
@@ -149,6 +174,7 @@ type OptionsConfiguration struct {
 	RestartOnWakeup      bool     `xml:"restartOnWakeup" default:"true"`
 	AutoUpgradeIntervalH int      `xml:"autoUpgradeIntervalH" default:"12"` // 0 for off
 	KeepTemporariesH     int      `xml:"keepTemporariesH" default:"24"`     // 0 for off
+	CacheIgnoredFiles    bool     `xml:"cacheIgnoredFiles" default:"true"`
 
 	Deprecated_RescanIntervalS int    `xml:"rescanIntervalS,omitempty" json:"-"`
 	Deprecated_UREnabled       bool   `xml:"urEnabled,omitempty" json:"-"`
@@ -273,6 +299,11 @@ func (cfg *Configuration) prepare(myID protocol.DeviceID) {
 		convertV4V5(cfg)
 	}
 
+	// Upgrade to v6 configuration if appropriate
+	if cfg.Version == 5 {
+		convertV5V6(cfg)
+	}
+
 	// Hash old cleartext passwords
 	if len(cfg.GUI.Password) > 0 && cfg.GUI.Password[0] != '$' {
 		hash, err := bcrypt.GenerateFromPassword([]byte(cfg.GUI.Password), 0)
@@ -343,6 +374,19 @@ func ChangeRequiresRestart(from, to Configuration) bool {
 	}
 
 	return false
+}
+
+func convertV5V6(cfg *Configuration) {
+	// Added ".stfolder" file at folder roots to identify mount issues
+	// Doesn't affect the config itself, but uses config migrations to identify
+	// the migration point.
+	for _, folder := range Wrap("", *cfg).Folders() {
+		// Best attempt, if it fails, it fails, the user will have to fix
+		// it up manually, as the repo will not get started.
+		folder.CreateMarker()
+	}
+
+	cfg.Version = 6
 }
 
 func convertV4V5(cfg *Configuration) {

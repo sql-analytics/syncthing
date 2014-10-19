@@ -30,7 +30,7 @@ go build json.go
 start() {
 	echo "Starting..."
 	for i in 1 2 3 4 ; do
-		STTRACE=files,model,puller,versioner STPROFILER=":909$i" syncthing -home "h$i" > "$i.out" 2>&1 &
+		STTRACE=files,model,puller,versioner STPROFILER=":909$i" ../bin/syncthing -home "h$i" > "$i.out" 2>&1 &
 	done
 }
 
@@ -43,9 +43,9 @@ stop() {
 
 clean() {
 	if [[ $(uname -s) == "Linux" ]] ; then
-		grep -v .stversions | grep -v utf8-nfd
+		grep -v .stversions | grep -v .stfolder | grep -v utf8-nfd
 	else
-		grep -v .stversions
+		grep -v .stversions | grep -v .stfolder
 	fi
 }
 
