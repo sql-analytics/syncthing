@@ -17,6 +17,7 @@ package files
 
 import (
 	"bytes"
+	"fmt"
 	"runtime"
 	"sort"
 	"sync"
@@ -57,6 +58,21 @@ type fileVersion struct {
 
 type versionList struct {
 	versions []fileVersion
+}
+
+func (l versionList) String() string {
+	var b bytes.Buffer
+	var id protocol.DeviceID
+	b.WriteString("{")
+	for i, v := range l.versions {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		copy(id[:], v.device)
+		fmt.Fprintf(&b, "{%d, %v}", v.version, id)
+	}
+	b.WriteString("}")
+	return b.String()
 }
 
 type fileList []protocol.FileInfo
@@ -151,7 +167,7 @@ type fileIterator func(f protocol.FileIntf) bool
 func ldbGenericReplace(db *leveldb.DB, folder, device []byte, fs []protocol.FileInfo, deleteFn deletionHandler) uint64 {
 	runtime.GC()
 
-	sort.Sort(fileList(fs)) // sort list on name, same as on disk
+	sort.Sort(fileList(fs)) // sort list on name, same as in the database
 
 	start := deviceKey(folder, device, nil)                            // before all folder/device files
 	limit := deviceKey(folder, device, []byte{0xff, 0xff, 0xff, 0xff}) // after all folder/device files
@@ -177,12 +193,6 @@ func ldbGenericReplace(db *leveldb.DB, folder, device []byte, fs []protocol.File
 			break
 		}
 
-		if !moreFs && deleteFn == nil {
-			// We don't have any more updated files to process and deletion
-			// has not been requested, so we can exit early
-			break
-		}
-
 		if moreFs {
 			newName = []byte(fs[fsi].Name)
 		}
@@ -199,8 +209,8 @@ func ldbGenericReplace(db *leveldb.DB, folder, device []byte, fs []protocol.File
 
 		switch {
 		case moreFs && (!moreDb || cmp == -1):
-			// Disk is missing this file. Insert it.
-			if lv := ldbInsert(batch, folder, device, newName, fs[fsi]); lv > maxLocalVer {
+			// Database is missing this file. Insert it.
+			if lv := ldbInsert(batch, folder, device, fs[fsi]); lv > maxLocalVer {
 				maxLocalVer = lv
 			}
 			if fs[fsi].IsInvalid() {
@@ -216,8 +226,9 @@ func ldbGenericReplace(db *leveldb.DB, folder, device []byte, fs []protocol.File
 			// marked a file as invalid, so handle that too.
 			var ef protocol.FileInfoTruncated
 			ef.UnmarshalXDR(dbi.Value())
-			if fs[fsi].Version > ef.Version || fs[fsi].Version != ef.Version {
-				if lv := ldbInsert(batch, folder, device, newName, fs[fsi]); lv > maxLocalVer {
+			if fs[fsi].Version > ef.Version ||
+				(fs[fsi].Version == ef.Version && fs[fsi].Flags != ef.Flags) {
+				if lv := ldbInsert(batch, folder, device, fs[fsi]); lv > maxLocalVer {
 					maxLocalVer = lv
 				}
 				if fs[fsi].IsInvalid() {
@@ -226,15 +237,12 @@ func ldbGenericReplace(db *leveldb.DB, folder, device []byte, fs []protocol.File
 					ldbUpdateGlobal(snap, batch, folder, device, newName, fs[fsi].Version)
 				}
 			}
-			// Iterate both sides.
 			fsi++
 			moreDb = dbi.Next()
 
 		case moreDb && (!moreFs || cmp == 1):
-			if deleteFn != nil {
-				if lv := deleteFn(snap, batch, folder, device, oldName, dbi); lv > maxLocalVer {
-					maxLocalVer = lv
-				}
+			if lv := deleteFn(snap, batch, folder, device, oldName, dbi); lv > maxLocalVer {
+				maxLocalVer = lv
 			}
 			moreDb = dbi.Next()
 		}
@@ -251,7 +259,7 @@ func ldbGenericReplace(db *leveldb.DB, folder, device []byte, fs []protocol.File
 func ldbReplace(db *leveldb.DB, folder, device []byte, fs []protocol.FileInfo) uint64 {
 	// TODO: Return the remaining maxLocalVer?
 	return ldbGenericReplace(db, folder, device, fs, func(db dbReader, batch dbWriter, folder, device, name []byte, dbi iterator.Iterator) uint64 {
-		// Disk has files that we are missing. Remove it.
+		// Database has a file that we are missing. Remove it.
 		if debug {
 			l.Debugf("delete; folder=%q device=%v name=%q", folder, protocol.DeviceIDFromBytes(device), name)
 		}
@@ -304,7 +312,7 @@ func ldbUpdate(db *leveldb.DB, folder, device []byte, fs []protocol.FileInfo) ui
 		fk := deviceKey(folder, device, name)
 		bs, err := snap.Get(fk, nil)
 		if err == leveldb.ErrNotFound {
-			if lv := ldbInsert(batch, folder, device, name, f); lv > maxLocalVer {
+			if lv := ldbInsert(batch, folder, device, f); lv > maxLocalVer {
 				maxLocalVer = lv
 			}
 			if f.IsInvalid() {
@@ -323,7 +331,7 @@ func ldbUpdate(db *leveldb.DB, folder, device []byte, fs []protocol.FileInfo) ui
 		// Flags might change without the version being bumped when we set the
 		// invalid flag on an existing file.
 		if ef.Version != f.Version || ef.Flags != f.Flags {
-			if lv := ldbInsert(batch, folder, device, name, f); lv > maxLocalVer {
+			if lv := ldbInsert(batch, folder, device, f); lv > maxLocalVer {
 				maxLocalVer = lv
 			}
 			if f.IsInvalid() {
@@ -342,7 +350,7 @@ func ldbUpdate(db *leveldb.DB, folder, device []byte, fs []protocol.FileInfo) ui
 	return maxLocalVer
 }
 
-func ldbInsert(batch dbWriter, folder, device, name []byte, file protocol.FileInfo) uint64 {
+func ldbInsert(batch dbWriter, folder, device []byte, file protocol.FileInfo) uint64 {
 	if debug {
 		l.Debugf("insert; folder=%q device=%v %v", folder, protocol.DeviceIDFromBytes(device), file)
 	}
@@ -351,6 +359,7 @@ func ldbInsert(batch dbWriter, folder, device, name []byte, file protocol.FileIn
 		file.LocalVersion = clock(0)
 	}
 
+	name := []byte(file.Name)
 	nk := deviceKey(folder, device, name)
 	batch.Put(nk, file.MarshalXDR())
 
@@ -576,9 +585,15 @@ func ldbWithGlobal(db *leveldb.DB, folder []byte, truncate bool, fn fileIterator
 			l.Debugln(dbi.Key())
 			panic("no versions?")
 		}
-		fk := deviceKey(folder, vl.versions[0].device, globalKeyName(dbi.Key()))
+		name := globalKeyName(dbi.Key())
+		fk := deviceKey(folder, vl.versions[0].device, name)
 		bs, err := snap.Get(fk, nil)
 		if err != nil {
+			l.Debugf("folder: %q (%x)", folder, folder)
+			l.Debugf("key: %q (%x)", dbi.Key(), dbi.Key())
+			l.Debugf("vl: %v", vl)
+			l.Debugf("name: %q (%x)", name, name)
+			l.Debugf("fk: %q (%x)", fk, fk)
 			panic(err)
 		}
 
@@ -670,6 +685,15 @@ outer:
 				fk := deviceKey(folder, vl.versions[i].device, name)
 				bs, err := snap.Get(fk, nil)
 				if err != nil {
+					var id protocol.DeviceID
+					copy(id[:], device)
+					l.Debugf("device: %v", id)
+					l.Debugf("need: %v, have: %v", need, have)
+					l.Debugf("key: %q (%x)", dbi.Key(), dbi.Key())
+					l.Debugf("vl: %v", vl)
+					l.Debugf("i: %v", i)
+					l.Debugf("fk: %q (%x)", fk, fk)
+					l.Debugf("name: %q (%x)", name, name)
 					panic(err)
 				}
 
