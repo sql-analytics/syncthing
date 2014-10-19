@@ -27,15 +27,15 @@ import (
 
 	"code.google.com/p/go.crypto/bcrypt"
 	"github.com/juju/ratelimit"
-	"github.com/syncthing/syncthing/config"
-	"github.com/syncthing/syncthing/discover"
-	"github.com/syncthing/syncthing/events"
-	"github.com/syncthing/syncthing/files"
-	"github.com/syncthing/syncthing/logger"
-	"github.com/syncthing/syncthing/model"
-	"github.com/syncthing/syncthing/protocol"
-	"github.com/syncthing/syncthing/upgrade"
-	"github.com/syncthing/syncthing/upnp"
+	"github.com/syncthing/syncthing/internal/config"
+	"github.com/syncthing/syncthing/internal/discover"
+	"github.com/syncthing/syncthing/internal/events"
+	"github.com/syncthing/syncthing/internal/files"
+	"github.com/syncthing/syncthing/internal/logger"
+	"github.com/syncthing/syncthing/internal/model"
+	"github.com/syncthing/syncthing/internal/protocol"
+	"github.com/syncthing/syncthing/internal/upgrade"
+	"github.com/syncthing/syncthing/internal/upnp"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
@@ -620,6 +620,10 @@ nextRepo:
 		go standbyMonitor()
 	}
 
+	if cfg.Options.AutoUpgradeIntervalH > 0 {
+		go autoUpgrade()
+	}
+
 	events.Default.Log(events.StartupComplete, nil)
 	go generateEvents()
 
@@ -1179,5 +1183,38 @@ func standbyMonitor() {
 			return
 		}
 		now = time.Now()
+	}
+}
+
+func autoUpgrade() {
+	var skipped bool
+	interval := time.Duration(cfg.Options.AutoUpgradeIntervalH) * time.Hour
+	for {
+		if skipped {
+			time.Sleep(interval)
+		} else {
+			skipped = true
+		}
+
+		rel, err := upgrade.LatestRelease(strings.Contains(Version, "-beta"))
+		if err != nil {
+			l.Warnln("Automatic upgrade:", err)
+			continue
+		}
+
+		if upgrade.CompareVersions(rel.Tag, Version) <= 0 {
+			continue
+		}
+
+		l.Infof("Automatic upgrade (current %q < latest %q)", Version, rel.Tag)
+		err = upgrade.UpgradeTo(rel, GoArchExtra)
+		if err != nil {
+			l.Warnln("Automatic upgrade:", err)
+			continue
+		}
+		l.Warnf("Automatically upgraded to version %q. Restarting in 1 minute.", rel.Tag)
+		time.Sleep(time.Minute)
+		stop <- exitUpgrading
+		return
 	}
 }
