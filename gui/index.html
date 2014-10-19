@@ -765,7 +765,7 @@
     </table>
   </modal>
 
-  <!-- Incoming node connection modal -->
+  <!-- Incoming device connection modal -->
 
   <div id="incomingConnection" class="modal fade" data-backdrop="static" data-keyboard="false" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -775,48 +775,48 @@
         </div>
         <div class="modal-body">
           <p>
-            <span translate>A connection was received from a node with the ID below.</span>
-            <span translate>Do you want to accept the connection and add the new node to the configuration?</span>
+            <span translate>A connection was received from a device with the ID below.</span>
+            <span translate>Do you want to accept the connection and add the new device to the configuration?</span>
           </p>
           <pre>{{incomingNodeID}}</pre>
         </div>
         <div class="modal-footer">
-          <button ng-click="blockNode()" class="btn btn-danger btn-sm"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Block Node</span></button>
-          <button ng-click="acceptNode()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Add Node</span></button>
+          <button ng-click="blockDevice()" class="btn btn-danger btn-sm"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Block Device</span></button>
+          <button ng-click="acceptDevice()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Add Device</span></button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Incoming unshared repo modal -->
+  <!-- Incoming unshared folder modal -->
 
-  <div id="incomingRepo" class="modal fade" data-backdrop="static" data-keyboard="false" tabindex="-1">
+  <div id="incomingFolder" class="modal fade" data-backdrop="static" data-keyboard="false" tabindex="-1">
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header alert alert-info">
-          <h4 translate class="modal-title">Repository Sharing Request</h4>
+          <h4 translate class="modal-title">Folder Sharing Request</h4>
         </div>
         <div class="modal-body">
           <p>
-            <span translate>Another node wants to share an existing repository with you.</span>
-            <span translate>If accepted, their contents will be merged with the current repository contents.</span>
+            <span translate>Another device wants to share an existing folder with you.</span>
+            <span translate>If accepted, their contents will be merged with the current folder contents.</span>
             </p>
           <table class="table table-condensed table-striped">
             <tbody>
               <tr>
-                <th><span class="glyphicon glyphicon-tag"></span>&emsp;<span translate>Repository ID</span></th>
+                <th><span class="glyphicon glyphicon-tag"></span>&emsp;<span translate>Folder ID</span></th>
                 <td class="text-right">{{incomingRepoID}}</td>
               </tr>
               <tr>
                 <th><span class="glyphicon glyphicon-share-alt"></span>&emsp;<span translate>Shared With</span></th>
-                <td class="text-right">{{nodeName(findNode(incomingNodeID))}}</td>
+                <td class="text-right">{{nodeName(findDevice(incomingNodeID))}}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-default btn-sm" data-dismiss="modal"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Ignore</span></button>
-          <button ng-click="acceptRepo()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Share Repository</span></button>
+          <button ng-click="acceptFolder()" class="btn btn-success btn-sm"><span class="glyphicon glyphicon-plus"></span>&emsp;<span translate>Share Folder</span></button>
         </div>
       </div>
     </div>

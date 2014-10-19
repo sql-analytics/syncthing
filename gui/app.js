@@ -25,18 +25,18 @@ var guiVersion = null;
 syncthing.config(function ($httpProvider, $translateProvider) {
     $httpProvider.defaults.xsrfHeaderName = 'X-CSRF-Token';
     $httpProvider.defaults.xsrfCookieName = 'CSRF-Token';
-    $httpProvider.interceptors.push(function() {
-      return {
-        response: function(response) {
-            var responseVersion = response.headers()['x-syncthing-version'];
-            if (!guiVersion) {
-                guiVersion = responseVersion;
-            } else if (guiVersion != responseVersion) {
-                document.location.reload(true);
+    $httpProvider.interceptors.push(function () {
+        return {
+            response: function (response) {
+                var responseVersion = response.headers()['x-syncthing-version'];
+                if (!guiVersion) {
+                    guiVersion = responseVersion;
+                } else if (guiVersion != responseVersion) {
+                    document.location.reload(true);
+                }
+                return response;
             }
-            return response;
-        }
-      };
+        };
     });
 
     $translateProvider.useStaticFilesLoader({
@@ -287,46 +287,46 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         }
     });
 
-    $scope.$on('NodeRejected', function (event, arg) {
+    $scope.$on('DeviceRejected', function (event, arg) {
         var i;
-        if (typeof $scope.incomingNodeID !== 'undefined') {
+        if (typeof $scope.incomingDeviceID !== 'undefined') {
             // An incoming request is already being processed in the GUI.
             return;
         }
-        for (i = 0; i < $scope.nodes.length; i++) {
+        for (i = 0; i < $scope.devices.length; i++) {
             // info the node is already in the config, skip it.
-            if ($scope.nodes[i].NodeID === arg.data.node) {
+            if ($scope.devices[i].DeviceID === arg.data.node) {
                 return;
             }
         }
-        $scope.incomingNodeID = arg.data.node;
+        $scope.incomingDeviceID = arg.data.node;
         $('#incomingConnection').modal();
     });
 
-    $scope.$on('RepoRejected', function (event, arg) {
+    $scope.$on('FolderRejected', function (event, arg) {
         var i, nodeList;
-        if ($scope.blocked[$scope.incomingNodeID] && $scope.blocked[$scope.incomingNodeID][$scope.incomingRepoID]) {
+        if ($scope.blocked[$scope.incomingDeviceID] && $scope.blocked[$scope.incomingDeviceID][$scope.incomingFolderID]) {
             // We've already said "ignore"
             return
         }
-        if (typeof $scope.incomingNodeID !== 'undefined') {
+        if (typeof $scope.incomingDeviceID !== 'undefined') {
             // An incoming request is already being processed in the GUI.
             return;
         }
-        if (!$scope.repos[arg.data.repo]) {
+        if (!$scope.folders[arg.data.repo]) {
             // If the repo is entirely unknown, we don't do anything.
             return;
         }
-        nodeList = $scope.repos[arg.data.repo].Nodes;
+        nodeList = $scope.folders[arg.data.repo].Devices;
         for (i = 0; i < nodeList.length; i++) {
             // info the repo is already shared with the node, skip it.
-            if (nodeList[i].NodeID === arg.data.node) {
+            if (nodeList[i].DeviceID === arg.data.node) {
                 return;
             }
         }
-        $scope.incomingNodeID = arg.data.node;
-        $scope.incomingRepoID = arg.data.repo;
-        $('#incomingRepo').modal();
+        $scope.incomingDeviceID = arg.data.node;
+        $scope.incomingFolderID = arg.data.repo;
+        $('#incomingFolder').modal();
     });
 
     var debouncedFuncs = {};
@@ -726,20 +726,20 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
 
     $scope.addDevice = function () {
         $http.get(urlbase + '/discovery')
-		.success(function (registry) {
-			$scope.discovery = registry;
-		})
-		.then(function () {
-			$scope.currentDevice = {
-			    AddressesStr: 'dynamic',
-			    Compression: true,
-			    Introducer: false
-			};
-			$scope.editingExisting = false;
-			$scope.editingSelf = false;
-			$scope.deviceEditor.$setPristine();
-			$('#editDevice').modal();
-		});
+            .success(function (registry) {
+                $scope.discovery = registry;
+            })
+            .then(function () {
+                $scope.currentDevice = {
+                    AddressesStr: 'dynamic',
+                    Compression: true,
+                    Introducer: false
+                };
+                $scope.editingExisting = false;
+                $scope.editingSelf = false;
+                $scope.deviceEditor.$setPristine();
+                $('#editDevice').modal();
+            });
     };
 
     $scope.deleteDevice = function () {
@@ -1058,43 +1058,43 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     };
 
     // Add the node to the config.
-    $scope.acceptNode = function () {
+    $scope.acceptDevice = function () {
         $('#incomingConnection').modal('hide');
-        $scope.config.Nodes.push({
-            NodeID: $scope.incomingNodeID
+        $scope.config.Devices.push({
+            DeviceID: $scope.incomingDeviceID
         });
         $scope.saveConfig();
-        delete $scope.incomingNodeID;
+        delete $scope.incomingDeviceID;
     };
 
     // Do not add the node, remember to not ask about it again.
-    $scope.blockNode = function () {
+    $scope.blockDevice = function () {
         $('#incomingConnection').modal('hide');
-        $scope.config.BlockedNodes = $scope.config.BlockedNodes || [];
-        $scope.config.BlockedNodes.push($scope.incomingNodeID);
+        $scope.config.BlockedDevices = $scope.config.BlockedDevices || [];
+        $scope.config.BlockedDevices.push($scope.incomingDeviceID);
         $scope.saveConfig();
-        delete $scope.incomingNodeID;
+        delete $scope.incomingDeviceID;
     };
 
-    // Share the repository with a new node.
-    $scope.acceptRepo = function () {
-        $('#incomingRepo').modal('hide');
-        $scope.repos[$scope.incomingRepoID].Nodes.push({
-            NodeID: $scope.incomingNodeID
+    // Share the folder with a new node.
+    $scope.acceptFolder = function () {
+        $('#incomingFolder').modal('hide');
+        $scope.folders[$scope.incomingFolderID].Devices.push({
+            DeviceID: $scope.incomingDeviceID
         })
-        $scope.config.Repositories = repoList($scope.repos);
+        $scope.config.Foldersitories = repoList($scope.folders);
         $scope.saveConfig();
-        delete $scope.incomingNodeID;
-        delete $scope.incomingRepoID;
+        delete $scope.incomingDeviceID;
+        delete $scope.incomingFolderID;
     };
 
     // Ignore the "sharing request"
-    $scope.blockRepo = function () {
-        $('#incomingRepo').modal('hide');
-        if (!$scope.blocked[$scope.incomingNodeID]) {
-            $scope.blocked[$scope.incomingNodeID] = {};
+    $scope.acceptFolder = function () {
+        $('#incomingFolder').modal('hide');
+        if (!$scope.blocked[$scope.incomingDeviceID]) {
+            $scope.blocked[$scope.incomingDeviceID] = {};
         }
-        $scope.blocked[$scope.incomingNodeID][$scope.incomingRepoID] = true;
+        $scope.blocked[$scope.incomingDeviceID][$scope.incomingFolderID] = true;
     };
 
     $scope.init();
@@ -1331,67 +1331,69 @@ syncthing.directive('modal', function () {
     };
 });
 
-syncthing.directive('identicon', ['$window', function ($window) {
-  var svgNS = 'http://www.w3.org/2000/svg';
+syncthing.directive('identicon', ['$window',
+    function ($window) {
+        var svgNS = 'http://www.w3.org/2000/svg';
 
-  function Identicon (value, size) {
-    var svg = document.createElementNS(svgNS, 'svg');
-    var shouldFillRectAt = function (row, col) {
-      return !($window.parseInt(value.charCodeAt(row + col * size), 10) % 2);
-    };
-    var shouldMirrorRectAt = function (row, col) {
-      return !(size % 2 && col === middleCol)
-    };
-    var mirrorColFor = function (col) {
-      return size - col - 1;
-    };
-    var fillRectAt = function (row, col) {
-      var rect = document.createElementNS(svgNS, 'rect');
+        function Identicon(value, size) {
+            var svg = document.createElementNS(svgNS, 'svg');
+            var shouldFillRectAt = function (row, col) {
+                return !($window.parseInt(value.charCodeAt(row + col * size), 10) % 2);
+            };
+            var shouldMirrorRectAt = function (row, col) {
+                return !(size % 2 && col === middleCol)
+            };
+            var mirrorColFor = function (col) {
+                return size - col - 1;
+            };
+            var fillRectAt = function (row, col) {
+                var rect = document.createElementNS(svgNS, 'rect');
 
-      rect.setAttribute('x', (col * rectSize) + '%');
-      rect.setAttribute('y', (row * rectSize) + '%');
-      rect.setAttribute('width', rectSize + '%');
-      rect.setAttribute('height', rectSize + '%');
+                rect.setAttribute('x', (col * rectSize) + '%');
+                rect.setAttribute('y', (row * rectSize) + '%');
+                rect.setAttribute('width', rectSize + '%');
+                rect.setAttribute('height', rectSize + '%');
 
-      svg.appendChild(rect);
-    };
-    var rect;
-    var row;
-    var col;
-    var middleCol;
-    var rectSize;
+                svg.appendChild(rect);
+            };
+            var rect;
+            var row;
+            var col;
+            var middleCol;
+            var rectSize;
 
-    svg.setAttribute('class', 'identicon');
-    size = size || 5;
-    rectSize = 100 / size;
-    middleCol = Math.ceil(size / 2) - 1;
+            svg.setAttribute('class', 'identicon');
+            size = size || 5;
+            rectSize = 100 / size;
+            middleCol = Math.ceil(size / 2) - 1;
 
-    if (value) {
-      value = value.toString().replace(/[\W_]/i, '');
+            if (value) {
+                value = value.toString().replace(/[\W_]/i, '');
 
-      for (row = 0; row < size; ++row) {
-        for (col = middleCol; col > -1; --col) {
-          if (shouldFillRectAt(row, col)) {
-            fillRectAt(row, col);
+                for (row = 0; row < size; ++row) {
+                    for (col = middleCol; col > -1; --col) {
+                        if (shouldFillRectAt(row, col)) {
+                            fillRectAt(row, col);
 
-            if (shouldMirrorRectAt(row, col)) {
-              fillRectAt(row, mirrorColFor(col));
+                            if (shouldMirrorRectAt(row, col)) {
+                                fillRectAt(row, mirrorColFor(col));
+                            }
+                        }
+                    }
+                }
             }
-          }
+
+            return svg;
         }
-      }
-    }
 
-    return svg;
-  }
-
-  return {
-    restrict: 'E',
-    scope: {
-      value: '='
-    },
-    link: function (scope, element, attributes) {
-      element.append(new Identicon(scope.value));
+        return {
+            restrict: 'E',
+            scope: {
+                value: '='
+            },
+            link: function (scope, element, attributes) {
+                element.append(new Identicon(scope.value));
+            }
+        }
     }
-  }
-}]);
+]);
