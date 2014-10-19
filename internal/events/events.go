@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 // Package events provides event subscription and polling functionality.
 package events
@@ -14,21 +25,21 @@ import (
 type EventType uint64
 
 const (
-	Ping = 1 << iota
+	Ping EventType = 1 << iota
 	Starting
 	StartupComplete
-	NodeDiscovered
-	NodeConnected
-	NodeDisconnected
-	NodeRejected
+	DeviceDiscovered
+	DeviceConnected
+	DeviceDisconnected
+	DeviceRejected
 	LocalIndexUpdated
 	RemoteIndexUpdated
 	ItemStarted
 	StateChanged
-	RepoRejected
+	FolderRejected
 	ConfigSaved
 
-	AllEvents = ^EventType(0)
+	AllEvents = (1 << iota) - 1
 )
 
 func (t EventType) String() string {
@@ -39,14 +50,14 @@ func (t EventType) String() string {
 		return "Starting"
 	case StartupComplete:
 		return "StartupComplete"
-	case NodeDiscovered:
-		return "NodeDiscovered"
-	case NodeConnected:
-		return "NodeConnected"
-	case NodeDisconnected:
-		return "NodeDisconnected"
-	case NodeRejected:
-		return "NodeRejected"
+	case DeviceDiscovered:
+		return "DeviceDiscovered"
+	case DeviceConnected:
+		return "DeviceConnected"
+	case DeviceDisconnected:
+		return "DeviceDisconnected"
+	case DeviceRejected:
+		return "DeviceRejected"
 	case LocalIndexUpdated:
 		return "LocalIndexUpdated"
 	case RemoteIndexUpdated:
@@ -55,8 +66,8 @@ func (t EventType) String() string {
 		return "ItemStarted"
 	case StateChanged:
 		return "StateChanged"
-	case RepoRejected:
-		return "RepoRejected"
+	case FolderRejected:
+		return "FolderRejected"
 	case ConfigSaved:
 		return "ConfigSaved"
 	default:
@@ -120,7 +131,7 @@ func (l *Logger) Log(t EventType, data interface{}) {
 			select {
 			case s.events <- e:
 			default:
-				//log.Println("Dropping event:", e)
+				// if s.events is not ready, drop the event
 			}
 		}
 	}
@@ -146,7 +157,7 @@ func (l *Logger) Subscribe(mask EventType) *Subscription {
 func (l *Logger) Unsubscribe(s *Subscription) {
 	l.mutex.Lock()
 	if debug {
-		dl.Debugln("unsubsribe")
+		dl.Debugln("unsubscribe")
 	}
 	delete(l.subs, s.id)
 	close(s.events)

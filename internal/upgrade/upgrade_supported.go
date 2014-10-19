@@ -1,8 +1,19 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
-// +build !solaris,!windows,!noupgrade
+// +build !windows,!noupgrade
 
 package upgrade
 
@@ -19,16 +30,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"bitbucket.org/kardianos/osext"
 )
 
 // Upgrade to the given release, saving the previous binary with a ".old" extension.
-func upgradeTo(rel Release, archExtra string) error {
-	path, err := osext.Executable()
-	if err != nil {
-		return err
-	}
+func upgradeTo(path string, rel Release, archExtra string) error {
 	osName := runtime.GOOS
 	if osName == "darwin" {
 		// We call the darwin release bundles macosx because that makes more

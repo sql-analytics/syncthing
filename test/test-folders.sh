@@ -2,9 +2,20 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# Copyright (C) 2014 Jakob Borg and other contributors. All rights reserved.
-# Use of this source code is governed by an MIT-style license that can be
-# found in the LICENSE file.
+# Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
 iterations=${1:-5}
 
@@ -55,7 +66,7 @@ testConvergence() {
 		tot=$(($s1comp + $s2comp))
 		echo $tot / 200
 		if [[ $tot == 200 ]] ; then
-			# when fixing up directories, a node will announce completion
+			# when fixing up directories, a device will announce completion
 			# slightly before it's actually complete. this is arguably a bug,
 			# but we let it slide for the moment as long as it gets there
 			# eventually.
@@ -71,7 +82,7 @@ testConvergence() {
 	popd >/dev/null
 
 	if ! cmp dirs-1 dirs-2 ; then
-		echo Repos differ
+		echo Folders differ
 		stop
 		exit 1
 	fi

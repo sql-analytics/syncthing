@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package versioner
 
@@ -30,7 +41,7 @@ type Interval struct {
 type Staggered struct {
 	versionsPath  string
 	cleanInterval int64
-	repoPath      string
+	folderPath    string
 	interval      [4]Interval
 	mutex         *sync.Mutex
 }
@@ -83,7 +94,7 @@ func (v Staggered) renameOld() {
 }
 
 // The constructor function takes a map of parameters and creates the type.
-func NewStaggered(repoID, repoPath string, params map[string]string) Versioner {
+func NewStaggered(folderID, folderPath string, params map[string]string) Versioner {
 	maxAge, err := strconv.ParseInt(params["maxAge"], 10, 0)
 	if err != nil {
 		maxAge = 31536000 // Default: ~1 year
@@ -93,13 +104,13 @@ func NewStaggered(repoID, repoPath string, params map[string]string) Versioner {
 		cleanInterval = 3600 // Default: clean once per hour
 	}
 
-	// Use custom path if set, otherwise .stversions in repoPath
+	// Use custom path if set, otherwise .stversions in folderPath
 	var versionsDir string
 	if params["versionsPath"] == "" {
 		if debug {
 			l.Debugln("using default dir .stversions")
 		}
-		versionsDir = filepath.Join(repoPath, ".stversions")
+		versionsDir = filepath.Join(folderPath, ".stversions")
 	} else {
 		if debug {
 			l.Debugln("using dir", params["versionsPath"])
@@ -111,12 +122,12 @@ func NewStaggered(repoID, repoPath string, params map[string]string) Versioner {
 	s := Staggered{
 		versionsPath:  versionsDir,
 		cleanInterval: cleanInterval,
-		repoPath:      repoPath,
+		folderPath:    folderPath,
 		interval: [4]Interval{
-			Interval{30, 3600},               // first hour -> 30 sec between versions
-			Interval{3600, 86400},            // next day -> 1 h between versions
-			Interval{86400, 592000},          // next 30 days -> 1 day between versions
-			Interval{604800, maxAge * 86400}, // next year -> 1 week between versions
+			{30, 3600},               // first hour -> 30 sec between versions
+			{3600, 86400},            // next day -> 1 h between versions
+			{86400, 592000},          // next 30 days -> 1 day between versions
+			{604800, maxAge * 86400}, // next year -> 1 week between versions
 		},
 		mutex: &mutex,
 	}
@@ -320,12 +331,12 @@ func (v Staggered) Archive(filePath string) error {
 	}
 
 	file := filepath.Base(filePath)
-	inRepoPath, err := filepath.Rel(v.repoPath, filepath.Dir(filePath))
+	inFolderPath, err := filepath.Rel(v.folderPath, filepath.Dir(filePath))
 	if err != nil {
 		return err
 	}
 
-	dir := filepath.Join(v.versionsPath, inRepoPath)
+	dir := filepath.Join(v.versionsPath, inFolderPath)
 	err = os.MkdirAll(dir, 0755)
 	if err != nil && !os.IsExist(err) {
 		return err

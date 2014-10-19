@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package main
 
@@ -31,13 +42,13 @@ func reportData(m *model.Model) map[string]interface{} {
 	res["version"] = Version
 	res["longVersion"] = LongVersion
 	res["platform"] = runtime.GOOS + "-" + runtime.GOARCH
-	res["numRepos"] = len(cfg.Repositories)
-	res["numNodes"] = len(cfg.Nodes)
+	res["numFolders"] = len(cfg.Folders())
+	res["numDevices"] = len(cfg.Devices())
 
 	var totFiles, maxFiles int
 	var totBytes, maxBytes int64
-	for _, repo := range cfg.Repositories {
-		files, _, bytes := m.GlobalSize(repo.ID)
+	for folderID := range cfg.Folders() {
+		files, _, bytes := m.GlobalSize(folderID)
 		totFiles += files
 		totBytes += bytes
 		if files > maxFiles {
@@ -49,9 +60,9 @@ func reportData(m *model.Model) map[string]interface{} {
 	}
 
 	res["totFiles"] = totFiles
-	res["repoMaxFiles"] = maxFiles
+	res["folderMaxFiles"] = maxFiles
 	res["totMiB"] = totBytes / 1024 / 1024
-	res["repoMaxMiB"] = maxBytes / 1024 / 1024
+	res["folderMaxMiB"] = maxBytes / 1024 / 1024
 
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)

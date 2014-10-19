@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package versioner
 
@@ -20,20 +31,20 @@ func init() {
 
 // The type holds our configuration
 type Simple struct {
-	keep     int
-	repoPath string
+	keep       int
+	folderPath string
 }
 
 // The constructor function takes a map of parameters and creates the type.
-func NewSimple(repoID, repoPath string, params map[string]string) Versioner {
+func NewSimple(folderID, folderPath string, params map[string]string) Versioner {
 	keep, err := strconv.Atoi(params["keep"])
 	if err != nil {
 		keep = 5 // A reasonable default
 	}
 
 	s := Simple{
-		keep:     keep,
-		repoPath: repoPath,
+		keep:       keep,
+		folderPath: folderPath,
 	}
 
 	if debug {
@@ -57,7 +68,7 @@ func (v Simple) Archive(filePath string) error {
 		}
 	}
 
-	versionsDir := filepath.Join(v.repoPath, ".stversions")
+	versionsDir := filepath.Join(v.folderPath, ".stversions")
 	_, err = os.Stat(versionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -76,12 +87,12 @@ func (v Simple) Archive(filePath string) error {
 	}
 
 	file := filepath.Base(filePath)
-	inRepoPath, err := filepath.Rel(v.repoPath, filepath.Dir(filePath))
+	inFolderPath, err := filepath.Rel(v.folderPath, filepath.Dir(filePath))
 	if err != nil {
 		return err
 	}
 
-	dir := filepath.Join(versionsDir, inRepoPath)
+	dir := filepath.Join(versionsDir, inFolderPath)
 	err = os.MkdirAll(dir, 0755)
 	if err != nil && !os.IsExist(err) {
 		return err

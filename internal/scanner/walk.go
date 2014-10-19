@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package scanner
 
@@ -48,7 +59,7 @@ type CurrentFiler interface {
 	CurrentFile(name string) protocol.FileInfo
 }
 
-// Walk returns the list of files found in the local repository by scanning the
+// Walk returns the list of files found in the local folder by scanning the
 // file system. Files are blockwise hashed.
 func (w *Walker) Walk() (chan protocol.FileInfo, error) {
 	if debug {
@@ -71,11 +82,6 @@ func (w *Walker) Walk() (chan protocol.FileInfo, error) {
 	}()
 
 	return hashedFiles, nil
-}
-
-// CleanTempFiles removes all files that match the temporary filename pattern.
-func (w *Walker) CleanTempFiles() {
-	filepath.Walk(w.Dir, w.cleanTempFile)
 }
 
 func (w *Walker) walkAndHashFiles(fchan chan protocol.FileInfo) filepath.WalkFunc {
@@ -179,16 +185,6 @@ func (w *Walker) walkAndHashFiles(fchan chan protocol.FileInfo) filepath.WalkFun
 
 		return nil
 	}
-}
-
-func (w *Walker) cleanTempFile(path string, info os.FileInfo, err error) error {
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeType == 0 && w.TempNamer.IsTemporary(path) {
-		os.Remove(path)
-	}
-	return nil
 }
 
 func checkDir(dir string) error {

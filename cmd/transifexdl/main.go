@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 // +build ignore
 
@@ -52,12 +63,11 @@ func main() {
 	var langs []string
 	for code, stat := range stats {
 		code = strings.Replace(code, "_", "-", 1)
-		if !curValidLangs[code] {
-			if pct := 100 * stat.Translated / (stat.Translated + stat.Untranslated); pct < 95 {
-				log.Printf("Skipping language %q (too low completion ratio %d%%)", code, pct)
-				os.Remove("lang-" + code + ".json")
-				continue
-			}
+		pct := 100 * stat.Translated / (stat.Translated + stat.Untranslated)
+		if pct < 75 || !curValidLangs[code] && pct < 95 {
+			log.Printf("Skipping language %q (too low completion ratio %d%%)", code, pct)
+			os.Remove("lang-" + code + ".json")
+			continue
 		}
 
 		langs = append(langs, code)

@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 // +build integration
 
@@ -38,11 +49,10 @@ func TestBenchmarkTransfer(t *testing.T) {
 		port:   8081,
 		apiKey: apiKey,
 	}
-	ver, err := sender.start()
+	err = sender.start()
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Println(ver)
 
 	receiver := syncthingProcess{ // id2
 		log:    "2.out",
@@ -50,12 +60,11 @@ func TestBenchmarkTransfer(t *testing.T) {
 		port:   8082,
 		apiKey: apiKey,
 	}
-	ver, err = receiver.start()
+	err = receiver.start()
 	if err != nil {
 		sender.stop()
 		t.Fatal(err)
 	}
-	log.Println(ver)
 
 	var t0 time.Time
 loop:
@@ -74,7 +83,7 @@ loop:
 		for _, ev := range evs {
 			if ev.Type == "StateChanged" {
 				data := ev.Data.(map[string]interface{})
-				if data["repo"].(string) != "default" {
+				if data["folder"].(string) != "default" {
 					continue
 				}
 				log.Println(ev)
@@ -88,6 +97,8 @@ loop:
 				}
 			}
 		}
+
+		time.Sleep(250 * time.Millisecond)
 	}
 
 	sender.stop()

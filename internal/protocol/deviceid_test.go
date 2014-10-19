@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package protocol
 
@@ -20,14 +31,14 @@ var formatCases = []string{
 	"p561017mzjnu2yiqgdreydm2mgtimgl3bxnpq6w5bmt88z4tjxzwicq2",
 }
 
-func TestFormatNodeID(t *testing.T) {
+func TestFormatDeviceID(t *testing.T) {
 	for i, tc := range formatCases {
-		var id NodeID
+		var id DeviceID
 		err := id.UnmarshalText([]byte(tc))
 		if err != nil {
 			t.Errorf("#%d UnmarshalText(%q); %v", i, tc, err)
 		} else if f := id.String(); f != formatted {
-			t.Errorf("#%d FormatNodeID(%q)\n\t%q !=\n\t%q", i, tc, f, formatted)
+			t.Errorf("#%d FormatDeviceID(%q)\n\t%q !=\n\t%q", i, tc, f, formatted)
 		}
 	}
 }
@@ -46,20 +57,20 @@ var validateCases = []struct {
 	{"p56ioi7mzjnu2iqgdreydm2mgtmgl3bxnpq6w5btbbz4tjxzwicqCCCC", false},
 }
 
-func TestValidateNodeID(t *testing.T) {
+func TestValidateDeviceID(t *testing.T) {
 	for _, tc := range validateCases {
-		var id NodeID
+		var id DeviceID
 		err := id.UnmarshalText([]byte(tc.s))
 		if (err == nil && !tc.ok) || (err != nil && tc.ok) {
-			t.Errorf("ValidateNodeID(%q); %v != %v", tc.s, err, tc.ok)
+			t.Errorf("ValidateDeviceID(%q); %v != %v", tc.s, err, tc.ok)
 		}
 	}
 }
 
-func TestMarshallingNodeID(t *testing.T) {
-	n0 := NodeID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 10, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
-	n1 := NodeID{}
-	n2 := NodeID{}
+func TestMarshallingDeviceID(t *testing.T) {
+	n0 := DeviceID{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 10, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	n1 := DeviceID{}
+	n2 := DeviceID{}
 
 	bs, _ := n0.MarshalText()
 	n1.UnmarshalText(bs)

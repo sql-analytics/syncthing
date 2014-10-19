@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 // Package upgrade downloads and compares releases, and upgrades the running binary.
 package upgrade
@@ -9,6 +20,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+
+	"github.com/calmh/osext"
 )
 
 type Release struct {
@@ -38,7 +51,12 @@ func init() {
 func UpgradeTo(rel Release, archExtra string) error {
 	select {
 	case <-upgradeUnlocked:
-		err := upgradeTo(rel, archExtra)
+		path, err := osext.Executable()
+		if err != nil {
+			upgradeUnlocked <- true
+			return err
+		}
+		err = upgradeTo(path, rel, archExtra)
 		// If we've failed to upgrade, unlock so that another attempt could be made
 		if err != nil {
 			upgradeUnlocked <- true

@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 // +build integration
 
@@ -8,6 +19,7 @@ package integration_test
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -48,11 +60,10 @@ func testRestartDuringTransfer(t *testing.T, restartSender, restartReceiver bool
 		port:   8081,
 		apiKey: apiKey,
 	}
-	ver, err := sender.start()
+	err = sender.start()
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Println(ver)
 
 	receiver := syncthingProcess{ // id2
 		log:    "2.out",
@@ -60,17 +71,20 @@ func testRestartDuringTransfer(t *testing.T, restartSender, restartReceiver bool
 		port:   8082,
 		apiKey: apiKey,
 	}
-	ver, err = receiver.start()
+	err = receiver.start()
 	if err != nil {
 		sender.stop()
 		t.Fatal(err)
 	}
-	log.Println(ver)
 
 	var prevComp int
 	for {
 		comp, err := sender.peerCompletion()
 		if err != nil {
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				time.Sleep(250 * time.Millisecond)
+				continue
+			}
 			sender.stop()
 			receiver.stop()
 			t.Fatal(err)
@@ -121,6 +135,8 @@ func testRestartDuringTransfer(t *testing.T, restartSender, restartReceiver bool
 
 			prevComp = curComp
 		}
+
+		time.Sleep(250 * time.Millisecond)
 	}
 
 	sender.stop()

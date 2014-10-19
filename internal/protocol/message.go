@@ -1,14 +1,25 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package protocol
 
 import "fmt"
 
 type IndexMessage struct {
-	Repository string // max:64
-	Files      []FileInfo
+	Folder string // max:64
+	Files  []FileInfo
 }
 
 type FileInfo struct {
@@ -90,10 +101,10 @@ func (b BlockInfo) String() string {
 }
 
 type RequestMessage struct {
-	Repository string // max:64
-	Name       string // max:8192
-	Offset     uint64
-	Size       uint32
+	Folder string // max:64
+	Name   string // max:8192
+	Offset uint64
+	Size   uint32
 }
 
 type ResponseMessage struct {
@@ -101,10 +112,10 @@ type ResponseMessage struct {
 }
 
 type ClusterConfigMessage struct {
-	ClientName    string       // max:64
-	ClientVersion string       // max:64
-	Repositories  []Repository // max:64
-	Options       []Option     // max:64
+	ClientName    string   // max:64
+	ClientVersion string   // max:64
+	Folders       []Folder // max:64
+	Options       []Option // max:64
 }
 
 func (o *ClusterConfigMessage) GetOption(key string) string {
@@ -116,12 +127,12 @@ func (o *ClusterConfigMessage) GetOption(key string) string {
 	return ""
 }
 
-type Repository struct {
-	ID    string // max:64
-	Nodes []Node // max:64
+type Folder struct {
+	ID      string   // max:64
+	Devices []Device // max:64
 }
 
-type Node struct {
+type Device struct {
 	ID              []byte // max:32
 	Flags           uint32
 	MaxLocalVersion uint64

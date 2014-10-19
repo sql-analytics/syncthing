@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package protocol
 
@@ -21,8 +32,8 @@ import (
 )
 
 var (
-	c0ID = NewNodeID([]byte{1})
-	c1ID = NewNodeID([]byte{2})
+	c0ID = NewDeviceID([]byte{1})
+	c1ID = NewDeviceID([]byte{2})
 )
 
 func TestHeaderFunctions(t *testing.T) {
@@ -140,8 +151,8 @@ func TestPingErr(t *testing.T) {
 // 			if string(d) != "response data" {
 // 				t.Fatalf("Incorrect response data %q", string(d))
 // 			}
-// 			if m0.repo != "default" {
-// 				t.Fatalf("Incorrect repo %q", m0.repo)
+// 			if m0.folder != "default" {
+// 				t.Fatalf("Incorrect folder %q", m0.folder)
 // 			}
 // 			if m0.name != "tn" {
 // 				t.Fatalf("Incorrect name %q", m0.name)
@@ -240,13 +251,13 @@ func TestClose(t *testing.T) {
 
 func TestElementSizeExceededNested(t *testing.T) {
 	m := ClusterConfigMessage{
-		Repositories: []Repository{
+		Folders: []Folder{
 			{ID: "longstringlongstringlongstringinglongstringlongstringlonlongstringlongstringlon"},
 		},
 	}
 	_, err := m.EncodeXDR(ioutil.Discard)
 	if err == nil {
-		t.Errorf("ID length %d > max 64, but no error", len(m.Repositories[0].ID))
+		t.Errorf("ID length %d > max 64, but no error", len(m.Folders[0].ID))
 	}
 }
 

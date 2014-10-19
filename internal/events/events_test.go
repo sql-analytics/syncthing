@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package events_test
 
@@ -41,7 +52,7 @@ func TestTimeout(t *testing.T) {
 func TestEventBeforeSubscribe(t *testing.T) {
 	l := events.NewLogger()
 
-	l.Log(events.NodeConnected, "foo")
+	l.Log(events.DeviceConnected, "foo")
 	s := l.Subscribe(0)
 
 	_, err := s.Poll(timeout)
@@ -54,14 +65,14 @@ func TestEventAfterSubscribe(t *testing.T) {
 	l := events.NewLogger()
 
 	s := l.Subscribe(events.AllEvents)
-	l.Log(events.NodeConnected, "foo")
+	l.Log(events.DeviceConnected, "foo")
 
 	ev, err := s.Poll(timeout)
 
 	if err != nil {
 		t.Fatal("Unexpected error:", err)
 	}
-	if ev.Type != events.NodeConnected {
+	if ev.Type != events.DeviceConnected {
 		t.Error("Incorrect event type", ev.Type)
 	}
 	switch v := ev.Data.(type) {
@@ -77,8 +88,8 @@ func TestEventAfterSubscribe(t *testing.T) {
 func TestEventAfterSubscribeIgnoreMask(t *testing.T) {
 	l := events.NewLogger()
 
-	s := l.Subscribe(events.NodeDisconnected)
-	l.Log(events.NodeConnected, "foo")
+	s := l.Subscribe(events.DeviceDisconnected)
+	l.Log(events.DeviceConnected, "foo")
 
 	_, err := s.Poll(timeout)
 	if err != events.ErrTimeout {
@@ -93,7 +104,7 @@ func TestBufferOverflow(t *testing.T) {
 
 	t0 := time.Now()
 	for i := 0; i < events.BufferSize*2; i++ {
-		l.Log(events.NodeConnected, "foo")
+		l.Log(events.DeviceConnected, "foo")
 	}
 	if time.Since(t0) > timeout {
 		t.Fatalf("Logging took too long")
@@ -104,7 +115,7 @@ func TestUnsubscribe(t *testing.T) {
 	l := events.NewLogger()
 
 	s := l.Subscribe(events.AllEvents)
-	l.Log(events.NodeConnected, "foo")
+	l.Log(events.DeviceConnected, "foo")
 
 	_, err := s.Poll(timeout)
 	if err != nil {
@@ -112,7 +123,7 @@ func TestUnsubscribe(t *testing.T) {
 	}
 
 	l.Unsubscribe(s)
-	l.Log(events.NodeConnected, "foo")
+	l.Log(events.DeviceConnected, "foo")
 
 	_, err = s.Poll(timeout)
 	if err != events.ErrClosed {
@@ -124,8 +135,8 @@ func TestIDs(t *testing.T) {
 	l := events.NewLogger()
 
 	s := l.Subscribe(events.AllEvents)
-	l.Log(events.NodeConnected, "foo")
-	l.Log(events.NodeConnected, "bar")
+	l.Log(events.DeviceConnected, "foo")
+	l.Log(events.DeviceConnected, "bar")
 
 	ev, err := s.Poll(timeout)
 	if err != nil {
@@ -156,7 +167,7 @@ func TestBufferedSub(t *testing.T) {
 
 	go func() {
 		for i := 0; i < 10*events.BufferSize; i++ {
-			l.Log(events.NodeConnected, fmt.Sprintf("event-%d", i))
+			l.Log(events.DeviceConnected, fmt.Sprintf("event-%d", i))
 			if i%30 == 0 {
 				// Give the buffer routine time to pick up the events
 				time.Sleep(20 * time.Millisecond)

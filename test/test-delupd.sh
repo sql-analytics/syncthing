@@ -2,9 +2,20 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# Copyright (C) 2014 Jakob Borg and other contributors. All rights reserved.
-# Use of this source code is governed by an MIT-style license that can be
-# found in the LICENSE file.
+# Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+#
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
 
 iterations=${1:-5}
 
@@ -19,7 +30,7 @@ go build json.go
 start() {
 	echo "Starting..."
 	for i in 1 2 3 ; do
-		STTRACE=files,model,puller,versioner,protocol STPROFILER=":909$i" syncthing -home "h$i" > "$i.out" 2>&1 &
+		STTRACE=model,scanner STPROFILER=":909$i" syncthing -home "h$i" > "$i.out" 2>&1 &
 	done
 }
 
@@ -100,7 +111,7 @@ alterFiles() {
 			echo "  $i: deleting $todelete files..."
 			set +o pipefail
 			find . -type f \
-				| grep -v large \
+				| grep -v timechanged \
 				| sort -k 1.16 \
 				| head -n "$todelete" \
 				| xargs rm -f
@@ -110,11 +121,10 @@ alterFiles() {
 		# Create some new files and alter existing ones
 		echo "  $i: random nonoverlapping"
 		../genfiles -maxexp 22 -files 200
-		echo "  $i: append to large file"
-		dd if=large-$i bs=1024k count=4 >> large-$i 2>/dev/null
 		echo "  $i: new files in ro directory"
 		uuidgen > ro-test/$(uuidgen)
 		chmod 500 ro-test
+		touch "timechanged-$i"
 
 		../md5r -l | sort | grep -v .stversions > ../md5-$i
 		popd >/dev/null
@@ -140,6 +150,7 @@ for i in 1 12-2 23-3; do
 	mkdir ro-test
 	uuidgen > ro-test/$(uuidgen)
 	chmod 500 ro-test
+	dd if=/dev/urandom of="timechanged-$i" bs=1024k count=1
 	popd >/dev/null
 done
 

@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package scanner
 
@@ -130,6 +141,50 @@ func TestWalkError(t *testing.T) {
 
 	if err == nil {
 		t.Error("no error from non-directory")
+	}
+}
+
+func TestVerify(t *testing.T) {
+	blocksize := 16
+	// data should be an even multiple of blocksize long
+	data := []byte("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut e")
+	buf := bytes.NewBuffer(data)
+
+	blocks, err := Blocks(buf, blocksize, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp := len(data) / blocksize; len(blocks) != exp {
+		t.Fatalf("Incorrect number of blocks %d != %d", len(blocks), exp)
+	}
+
+	buf = bytes.NewBuffer(data)
+	err = Verify(buf, blocksize, blocks)
+	t.Log(err)
+	if err != nil {
+		t.Fatal("Unexpected verify failure", err)
+	}
+
+	buf = bytes.NewBuffer(append(data, '\n'))
+	err = Verify(buf, blocksize, blocks)
+	t.Log(err)
+	if err == nil {
+		t.Fatal("Unexpected verify success")
+	}
+
+	buf = bytes.NewBuffer(data[:len(data)-1])
+	err = Verify(buf, blocksize, blocks)
+	t.Log(err)
+	if err == nil {
+		t.Fatal("Unexpected verify success")
+	}
+
+	data[42] = 42
+	buf = bytes.NewBuffer(data)
+	err = Verify(buf, blocksize, blocks)
+	t.Log(err)
+	if err == nil {
+		t.Fatal("Unexpected verify success")
 	}
 }
 

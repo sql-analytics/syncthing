@@ -6,11 +6,6 @@
 	],
 	"Deps": [
 		{
-			"ImportPath": "bitbucket.org/kardianos/osext",
-			"Comment": "null-13",
-			"Rev": "5d3ddcf53a508cc2f7404eaebf546ef2cb5cdb6e"
-		},
-		{
 			"ImportPath": "code.google.com/p/go.crypto/bcrypt",
 			"Comment": "null-216",
 			"Rev": "41cd4647fccc72b0b79ef1bd1fe6735e718257cd"
@@ -40,6 +35,10 @@
 			"Rev": "93a831dcee242be64a9cc9803dda84af25932de7"
 		},
 		{
+			"ImportPath": "github.com/calmh/osext",
+			"Rev": "9bf61584e5f1f172e8766ddc9022d9c401faaa5e"
+		},
+		{
 			"ImportPath": "github.com/calmh/xdr",
 			"Rev": "a597b63b87d6140f79084c8aab214b4d533833a1"
 		},
@@ -49,7 +48,7 @@
 		},
 		{
 			"ImportPath": "github.com/syndtr/goleveldb/leveldb",
-			"Rev": "9bca75c48d6c31becfbb127702b425e7226052e3"
+			"Rev": "0d8857b7ec571b0a6c9677d8e6c0a4ceeabd1d71"
 		},
 		{
 			"ImportPath": "github.com/vitrun/qart/coding",

@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package main
 
@@ -26,6 +37,7 @@ import (
 	"github.com/syncthing/syncthing/internal/events"
 	"github.com/syncthing/syncthing/internal/logger"
 	"github.com/syncthing/syncthing/internal/model"
+	"github.com/syncthing/syncthing/internal/osutil"
 	"github.com/syncthing/syncthing/internal/protocol"
 	"github.com/syncthing/syncthing/internal/upgrade"
 	"github.com/vitrun/qart/qr"
@@ -48,10 +60,10 @@ var (
 func init() {
 	l.AddHandler(logger.LevelWarn, showGuiError)
 	// A subscription for all non-rejection events.
-	sub := events.Default.Subscribe(^events.EventType(events.NodeRejected | events.RepoRejected))
+	sub := events.Default.Subscribe(^events.EventType(events.DeviceRejected | events.FolderRejected))
 	eventSub = events.NewBufferedSubscription(sub, 1000)
 	// A subscription for all rejection events, specifically.
-	sub = events.Default.Subscribe(events.NodeRejected | events.RepoRejected | events.Ping)
+	sub = events.Default.Subscribe(events.DeviceRejected | events.FolderRejected | events.Ping)
 	rejectedEventSub = events.NewBufferedSubscription(sub, 10)
 }
 
@@ -92,14 +104,13 @@ func startGUI(cfg config.GUIConfiguration, assetDir string, m *model.Model) erro
 	getRestMux.HandleFunc("/rest/ignores", withModel(m, restGetIgnores))
 	getRestMux.HandleFunc("/rest/lang", restGetLang)
 	getRestMux.HandleFunc("/rest/model", withModel(m, restGetModel))
-	getRestMux.HandleFunc("/rest/model/version", withModel(m, restGetModelVersion))
 	getRestMux.HandleFunc("/rest/need", withModel(m, restGetNeed))
-	getRestMux.HandleFunc("/rest/nodeid", restGetNodeID)
+	getRestMux.HandleFunc("/rest/deviceid", restGetDeviceID)
 	getRestMux.HandleFunc("/rest/report", withModel(m, restGetReport))
 	getRestMux.HandleFunc("/rest/system", restGetSystem)
 	getRestMux.HandleFunc("/rest/upgrade", restGetUpgrade)
 	getRestMux.HandleFunc("/rest/version", restGetVersion)
-	getRestMux.HandleFunc("/rest/stats/node", withModel(m, restGetNodeStats))
+	getRestMux.HandleFunc("/rest/stats/device", withModel(m, restGetDeviceStats))
 
 	// Debug endpoints, not for general use
 	getRestMux.HandleFunc("/rest/debug/peerCompletion", withModel(m, restGetPeerCompletion))
@@ -226,29 +237,18 @@ func restGetVersion(w http.ResponseWriter, r *http.Request) {
 
 func restGetCompletion(m *model.Model, w http.ResponseWriter, r *http.Request) {
 	var qs = r.URL.Query()
-	var repo = qs.Get("repo")
-	var nodeStr = qs.Get("node")
+	var folder = qs.Get("folder")
+	var deviceStr = qs.Get("device")
 
-	node, err := protocol.NodeIDFromString(nodeStr)
+	device, err := protocol.DeviceIDFromString(deviceStr)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 
 	res := map[string]float64{
-		"completion": m.Completion(node, repo),
+		"completion": m.Completion(device, folder),
 	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(res)
-}
-
-func restGetModelVersion(m *model.Model, w http.ResponseWriter, r *http.Request) {
-	var qs = r.URL.Query()
-	var repo = qs.Get("repo")
-	var res = make(map[string]interface{})
-
-	res["version"] = m.LocalVersion(repo)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(res)
@@ -256,29 +256,24 @@ func restGetModelVersion(m *model.Model, w http.ResponseWriter, r *http.Request)
 
 func restGetModel(m *model.Model, w http.ResponseWriter, r *http.Request) {
 	var qs = r.URL.Query()
-	var repo = qs.Get("repo")
+	var folder = qs.Get("folder")
 	var res = make(map[string]interface{})
 
-	for _, cr := range cfg.Repositories {
-		if cr.ID == repo {
-			res["invalid"] = cr.Invalid
-			break
-		}
-	}
+	res["invalid"] = cfg.Folders()[folder].Invalid
 
-	globalFiles, globalDeleted, globalBytes := m.GlobalSize(repo)
+	globalFiles, globalDeleted, globalBytes := m.GlobalSize(folder)
 	res["globalFiles"], res["globalDeleted"], res["globalBytes"] = globalFiles, globalDeleted, globalBytes
 
-	localFiles, localDeleted, localBytes := m.LocalSize(repo)
+	localFiles, localDeleted, localBytes := m.LocalSize(folder)
 	res["localFiles"], res["localDeleted"], res["localBytes"] = localFiles, localDeleted, localBytes
 
-	needFiles, needBytes := m.NeedSize(repo)
+	needFiles, needBytes := m.NeedSize(folder)
 	res["needFiles"], res["needBytes"] = needFiles, needBytes
 
 	res["inSyncFiles"], res["inSyncBytes"] = globalFiles-needFiles, globalBytes-needBytes
 
-	res["state"], res["stateChanged"] = m.State(repo)
-	res["version"] = m.LocalVersion(repo)
+	res["state"], res["stateChanged"] = m.State(folder)
+	res["version"] = m.CurrentLocalVersion(folder) + m.RemoteLocalVersion(folder)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(res)
@@ -286,15 +281,15 @@ func restGetModel(m *model.Model, w http.ResponseWriter, r *http.Request) {
 
 func restPostOverride(m *model.Model, w http.ResponseWriter, r *http.Request) {
 	var qs = r.URL.Query()
-	var repo = qs.Get("repo")
-	go m.Override(repo)
+	var folder = qs.Get("folder")
+	go m.Override(folder)
 }
 
 func restGetNeed(m *model.Model, w http.ResponseWriter, r *http.Request) {
 	var qs = r.URL.Query()
-	var repo = qs.Get("repo")
+	var folder = qs.Get("folder")
 
-	files := m.NeedFilesRepoLimited(repo, 100, 2500) // max 100 files or 2500 blocks
+	files := m.NeedFolderFilesLimited(folder, 100, 2500) // max 100 files or 2500 blocks
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(files)
@@ -306,15 +301,15 @@ func restGetConnections(m *model.Model, w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(res)
 }
 
-func restGetNodeStats(m *model.Model, w http.ResponseWriter, r *http.Request) {
-	var res = m.NodeStatistics()
+func restGetDeviceStats(m *model.Model, w http.ResponseWriter, r *http.Request) {
+	var res = m.DeviceStatistics()
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(res)
 }
 
 func restGetConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(cfg)
+	json.NewEncoder(w).Encode(cfg.Raw())
 }
 
 func restPostConfig(m *model.Model, w http.ResponseWriter, r *http.Request) {
@@ -325,7 +320,7 @@ func restPostConfig(m *model.Model, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	} else {
-		if newCfg.GUI.Password != cfg.GUI.Password {
+		if newCfg.GUI.Password != cfg.GUI().Password {
 			if newCfg.GUI.Password != "" {
 				hash, err := bcrypt.GenerateFromPassword([]byte(newCfg.GUI.Password), 0)
 				if err != nil {
@@ -340,7 +335,7 @@ func restPostConfig(m *model.Model, w http.ResponseWriter, r *http.Request) {
 
 		// Start or stop usage reporting as appropriate
 
-		if newCfg.Options.URAccepted > cfg.Options.URAccepted {
+		if curAcc := cfg.Options().URAccepted; newCfg.Options.URAccepted > curAcc {
 			// UR was enabled
 			newCfg.Options.URAccepted = usageReportVersion
 			err := sendUsageReport(m)
@@ -348,7 +343,7 @@ func restPostConfig(m *model.Model, w http.ResponseWriter, r *http.Request) {
 				l.Infoln("Usage report:", err)
 			}
 			go usageReportingLoop(m)
-		} else if newCfg.Options.URAccepted < cfg.Options.URAccepted {
+		} else if newCfg.Options.URAccepted < curAcc {
 			// UR was disabled
 			newCfg.Options.URAccepted = -1
 			stopUsageReporting()
@@ -356,10 +351,9 @@ func restPostConfig(m *model.Model, w http.ResponseWriter, r *http.Request) {
 
 		// Activate and save
 
-		configInSync = !config.ChangeRequiresRestart(cfg, newCfg)
-		newCfg.Location = cfg.Location
-		newCfg.Save()
-		cfg = newCfg
+		configInSync = !config.ChangeRequiresRestart(cfg.Raw(), newCfg)
+		cfg.Replace(newCfg)
+		cfg.Save()
 	}
 }
 
@@ -374,8 +368,8 @@ func restPostRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func restPostReset(w http.ResponseWriter, r *http.Request) {
-	flushResponse(`{"ok": "resetting repos"}`, w)
-	resetRepositories()
+	flushResponse(`{"ok": "resetting folders"}`, w)
+	resetFolders()
 	go restart()
 }
 
@@ -397,13 +391,14 @@ func restGetSystem(w http.ResponseWriter, r *http.Request) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
+	tilde, _ := osutil.ExpandTilde("~")
 	res := make(map[string]interface{})
 	res["myID"] = myID.String()
 	res["goroutines"] = runtime.NumGoroutine()
 	res["alloc"] = m.Alloc
 	res["sys"] = m.Sys - m.HeapReleased
-	res["tilde"] = expandTilde("~")
-	if cfg.Options.GlobalAnnEnabled && discoverer != nil {
+	res["tilde"] = tilde
+	if cfg.Options().GlobalAnnEnabled && discoverer != nil {
 		res["extAnnounceOK"] = discoverer.ExtAnnounceOK()
 	}
 	cpuUsageLock.RLock()
@@ -448,10 +443,10 @@ func showGuiError(l logger.LogLevel, err string) {
 
 func restPostDiscoveryHint(w http.ResponseWriter, r *http.Request) {
 	var qs = r.URL.Query()
-	var node = qs.Get("node")
+	var device = qs.Get("device")
 	var addr = qs.Get("addr")
-	if len(node) != 0 && len(addr) != 0 && discoverer != nil {
-		discoverer.Hint(node, []string{addr})
+	if len(device) != 0 && len(addr) != 0 && discoverer != nil {
+		discoverer.Hint(device, []string{addr})
 	}
 }
 
@@ -468,7 +463,7 @@ func restGetIgnores(m *model.Model, w http.ResponseWriter, r *http.Request) {
 	qs := r.URL.Query()
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-	ignores, err := m.GetIgnores(qs.Get("repo"))
+	ignores, err := m.GetIgnores(qs.Get("folder"))
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -490,7 +485,7 @@ func restPostIgnores(m *model.Model, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = m.SetIgnores(qs.Get("repo"), data["ignore"])
+	err = m.SetIgnores(qs.Get("folder"), data["ignore"])
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -548,10 +543,10 @@ func restGetUpgrade(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(res)
 }
 
-func restGetNodeID(w http.ResponseWriter, r *http.Request) {
+func restGetDeviceID(w http.ResponseWriter, r *http.Request) {
 	qs := r.URL.Query()
 	idStr := qs.Get("id")
-	id, err := protocol.NodeIDFromString(idStr)
+	id, err := protocol.DeviceIDFromString(idStr)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err == nil {
 		json.NewEncoder(w).Encode(map[string]string{
@@ -599,9 +594,9 @@ func restPostUpgrade(w http.ResponseWriter, r *http.Request) {
 
 func restPostScan(m *model.Model, w http.ResponseWriter, r *http.Request) {
 	qs := r.URL.Query()
-	repo := qs.Get("repo")
+	folder := qs.Get("folder")
 	sub := qs.Get("sub")
-	err := m.ScanRepoSub(repo, sub)
+	err := m.ScanFolderSub(folder, sub)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
@@ -624,21 +619,21 @@ func restGetPeerCompletion(m *model.Model, w http.ResponseWriter, r *http.Reques
 	tot := map[string]float64{}
 	count := map[string]float64{}
 
-	for _, repo := range cfg.Repositories {
-		for _, node := range repo.NodeIDs() {
-			nodeStr := node.String()
-			if m.ConnectedTo(node) {
-				tot[nodeStr] += m.Completion(node, repo.ID)
+	for _, folder := range cfg.Folders() {
+		for _, device := range folder.DeviceIDs() {
+			deviceStr := device.String()
+			if m.ConnectedTo(device) {
+				tot[deviceStr] += m.Completion(device, folder.ID)
 			} else {
-				tot[nodeStr] = 0
+				tot[deviceStr] = 0
 			}
-			count[nodeStr]++
+			count[deviceStr]++
 		}
 	}
 
 	comp := map[string]int{}
-	for node := range tot {
-		comp[node] = int(tot[node] / count[node])
+	for device := range tot {
+		comp[device] = int(tot[device] / count[device])
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

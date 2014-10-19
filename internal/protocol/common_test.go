@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package protocol
 
@@ -11,7 +22,7 @@ import (
 
 type TestModel struct {
 	data     []byte
-	repo     string
+	folder   string
 	name     string
 	offset   int64
 	size     int
@@ -24,25 +35,25 @@ func newTestModel() *TestModel {
 	}
 }
 
-func (t *TestModel) Index(nodeID NodeID, repo string, files []FileInfo) {
+func (t *TestModel) Index(deviceID DeviceID, folder string, files []FileInfo) {
 }
 
-func (t *TestModel) IndexUpdate(nodeID NodeID, repo string, files []FileInfo) {
+func (t *TestModel) IndexUpdate(deviceID DeviceID, folder string, files []FileInfo) {
 }
 
-func (t *TestModel) Request(nodeID NodeID, repo, name string, offset int64, size int) ([]byte, error) {
-	t.repo = repo
+func (t *TestModel) Request(deviceID DeviceID, folder, name string, offset int64, size int) ([]byte, error) {
+	t.folder = folder
 	t.name = name
 	t.offset = offset
 	t.size = size
 	return t.data, nil
 }
 
-func (t *TestModel) Close(nodeID NodeID, err error) {
+func (t *TestModel) Close(deviceID DeviceID, err error) {
 	close(t.closedCh)
 }
 
-func (t *TestModel) ClusterConfig(nodeID NodeID, config ClusterConfigMessage) {
+func (t *TestModel) ClusterConfig(deviceID DeviceID, config ClusterConfigMessage) {
 }
 
 func (t *TestModel) isClosed() bool {

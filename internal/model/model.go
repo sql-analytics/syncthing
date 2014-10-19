@@ -1,6 +1,17 @@
 // Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
-// All rights reserved. Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <http://www.gnu.org/licenses/>.
 
 package model
 
@@ -28,27 +39,28 @@ import (
 	"github.com/syncthing/syncthing/internal/protocol"
 	"github.com/syncthing/syncthing/internal/scanner"
 	"github.com/syncthing/syncthing/internal/stats"
+	"github.com/syncthing/syncthing/internal/versioner"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-type repoState int
+type folderState int
 
 const (
-	RepoIdle repoState = iota
-	RepoScanning
-	RepoSyncing
-	RepoCleaning
+	FolderIdle folderState = iota
+	FolderScanning
+	FolderSyncing
+	FolderCleaning
 )
 
-func (s repoState) String() string {
+func (s folderState) String() string {
 	switch s {
-	case RepoIdle:
+	case FolderIdle:
 		return "idle"
-	case RepoScanning:
+	case FolderScanning:
 		return "scanning"
-	case RepoCleaning:
+	case FolderCleaning:
 		return "cleaning"
-	case RepoSyncing:
+	case FolderSyncing:
 		return "syncing"
 	default:
 		return "unknown"
@@ -63,34 +75,39 @@ const (
 	indexBatchSize    = 1000       // Either way, don't include more files than this
 )
 
-type Model struct {
-	indexDir string
-	cfg      *config.Configuration
-	db       *leveldb.DB
+type service interface {
+	Serve()
+	Stop()
+}
 
-	nodeName      string
+type Model struct {
+	cfg *config.ConfigWrapper
+	db  *leveldb.DB
+
+	deviceName    string
 	clientName    string
 	clientVersion string
 
-	repoCfgs     map[string]config.RepositoryConfiguration          // repo -> cfg
-	repoFiles    map[string]*files.Set                              // repo -> files
-	repoNodes    map[string][]protocol.NodeID                       // repo -> nodeIDs
-	nodeRepos    map[protocol.NodeID][]string                       // nodeID -> repos
-	nodeStatRefs map[protocol.NodeID]*stats.NodeStatisticsReference // nodeID -> statsRef
-	repoIgnores  map[string]ignore.Patterns                         // repo -> list of ignore patterns
-	rmut         sync.RWMutex                                       // protects the above
+	folderCfgs     map[string]config.FolderConfiguration                  // folder -> cfg
+	folderFiles    map[string]*files.Set                                  // folder -> files
+	folderDevices  map[string][]protocol.DeviceID                         // folder -> deviceIDs
+	deviceFolders  map[protocol.DeviceID][]string                         // deviceID -> folders
+	deviceStatRefs map[protocol.DeviceID]*stats.DeviceStatisticsReference // deviceID -> statsRef
+	folderIgnores  map[string]ignore.Patterns                             // folder -> list of ignore patterns
+	folderRunners  map[string]service                                     // folder -> puller or scanner
+	fmut           sync.RWMutex                                           // protects the above
 
-	repoState        map[string]repoState // repo -> state
-	repoStateChanged map[string]time.Time // repo -> time when state changed
-	smut             sync.RWMutex
+	folderState        map[string]folderState // folder -> state
+	folderStateChanged map[string]time.Time   // folder -> time when state changed
+	smut               sync.RWMutex
 
-	protoConn map[protocol.NodeID]protocol.Connection
-	rawConn   map[protocol.NodeID]io.Closer
-	nodeVer   map[protocol.NodeID]string
+	protoConn map[protocol.DeviceID]protocol.Connection
+	rawConn   map[protocol.DeviceID]io.Closer
+	deviceVer map[protocol.DeviceID]string
 	pmut      sync.RWMutex // protects protoConn and rawConn
 
-	addedRepo bool
-	started   bool
+	addedFolder bool
+	started     bool
 }
 
 var (
@@ -100,26 +117,26 @@ var (
 
 // NewModel creates and starts a new model. The model starts in read-only mode,
 // where it sends index information to connected peers and responds to requests
-// for file data without altering the local repository in any way.
-func NewModel(indexDir string, cfg *config.Configuration, nodeName, clientName, clientVersion string, db *leveldb.DB) *Model {
+// for file data without altering the local folder in any way.
+func NewModel(cfg *config.ConfigWrapper, deviceName, clientName, clientVersion string, db *leveldb.DB) *Model {
 	m := &Model{
-		indexDir:         indexDir,
-		cfg:              cfg,
-		db:               db,
-		nodeName:         nodeName,
-		clientName:       clientName,
-		clientVersion:    clientVersion,
-		repoCfgs:         make(map[string]config.RepositoryConfiguration),
-		repoFiles:        make(map[string]*files.Set),
-		repoNodes:        make(map[string][]protocol.NodeID),
-		nodeRepos:        make(map[protocol.NodeID][]string),
-		nodeStatRefs:     make(map[protocol.NodeID]*stats.NodeStatisticsReference),
-		repoIgnores:      make(map[string]ignore.Patterns),
-		repoState:        make(map[string]repoState),
-		repoStateChanged: make(map[string]time.Time),
-		protoConn:        make(map[protocol.NodeID]protocol.Connection),
-		rawConn:          make(map[protocol.NodeID]io.Closer),
-		nodeVer:          make(map[protocol.NodeID]string),
+		cfg:                cfg,
+		db:                 db,
+		deviceName:         deviceName,
+		clientName:         clientName,
+		clientVersion:      clientVersion,
+		folderCfgs:         make(map[string]config.FolderConfiguration),
+		folderFiles:        make(map[string]*files.Set),
+		folderDevices:      make(map[string][]protocol.DeviceID),
+		deviceFolders:      make(map[protocol.DeviceID][]string),
+		deviceStatRefs:     make(map[protocol.DeviceID]*stats.DeviceStatisticsReference),
+		folderIgnores:      make(map[string]ignore.Patterns),
+		folderRunners:      make(map[string]service),
+		folderState:        make(map[string]folderState),
+		folderStateChanged: make(map[string]time.Time),
+		protoConn:          make(map[protocol.DeviceID]protocol.Connection),
+		rawConn:            make(map[protocol.DeviceID]io.Closer),
+		deviceVer:          make(map[protocol.DeviceID]string),
 	}
 
 	var timeout = 20 * 60 // seconds
@@ -129,7 +146,7 @@ func NewModel(indexDir string, cfg *config.Configuration, nodeName, clientName, 
 			timeout = it
 		}
 	}
-	deadlockDetect(&m.rmut, time.Duration(timeout)*time.Second)
+	deadlockDetect(&m.fmut, time.Duration(timeout)*time.Second)
 	deadlockDetect(&m.smut, time.Duration(timeout)*time.Second)
 	deadlockDetect(&m.pmut, time.Duration(timeout)*time.Second)
 	return m
@@ -137,23 +154,61 @@ func NewModel(indexDir string, cfg *config.Configuration, nodeName, clientName, 
 
 // StartRW starts read/write processing on the current model. When in
 // read/write mode the model will attempt to keep in sync with the cluster by
-// pulling needed files from peer nodes.
-func (m *Model) StartRepoRW(repo string, threads int) {
-	m.rmut.RLock()
-	defer m.rmut.RUnlock()
-
-	if cfg, ok := m.repoCfgs[repo]; !ok {
-		panic("cannot start without repo")
-	} else {
-		newPuller(cfg, m, threads, m.cfg)
+// pulling needed files from peer devices.
+func (m *Model) StartFolderRW(folder string) {
+	m.fmut.Lock()
+	cfg, ok := m.folderCfgs[folder]
+	if !ok {
+		panic("cannot start nonexistent folder " + folder)
 	}
+
+	_, ok = m.folderRunners[folder]
+	if ok {
+		panic("cannot start already running folder " + folder)
+	}
+	p := &Puller{
+		folder:   folder,
+		dir:      cfg.Path,
+		scanIntv: time.Duration(cfg.RescanIntervalS) * time.Second,
+		model:    m,
+	}
+	m.folderRunners[folder] = p
+	m.fmut.Unlock()
+
+	if len(cfg.Versioning.Type) > 0 {
+		factory, ok := versioner.Factories[cfg.Versioning.Type]
+		if !ok {
+			l.Fatalf("Requested versioning type %q that does not exist", cfg.Versioning.Type)
+		}
+		p.versioner = factory(folder, cfg.Path, cfg.Versioning.Params)
+	}
+
+	go p.Serve()
 }
 
 // StartRO starts read only processing on the current model. When in
 // read only mode the model will announce files to the cluster but not
 // pull in any external changes.
-func (m *Model) StartRepoRO(repo string) {
-	m.StartRepoRW(repo, 0) // zero threads => read only
+func (m *Model) StartFolderRO(folder string) {
+	m.fmut.Lock()
+	cfg, ok := m.folderCfgs[folder]
+	if !ok {
+		panic("cannot start nonexistent folder " + folder)
+	}
+
+	_, ok = m.folderRunners[folder]
+	if ok {
+		panic("cannot start already running folder " + folder)
+	}
+	s := &Scanner{
+		folder: folder,
+		intv:   time.Duration(cfg.RescanIntervalS) * time.Second,
+		model:  m,
+	}
+	m.folderRunners[folder] = s
+	m.fmut.Unlock()
+
+	go s.Serve()
 }
 
 type ConnectionInfo struct {
@@ -162,29 +217,29 @@ type ConnectionInfo struct {
 	ClientVersion string
 }
 
-// ConnectionStats returns a map with connection statistics for each connected node.
+// ConnectionStats returns a map with connection statistics for each connected device.
 func (m *Model) ConnectionStats() map[string]ConnectionInfo {
 	type remoteAddrer interface {
 		RemoteAddr() net.Addr
 	}
 
 	m.pmut.RLock()
-	m.rmut.RLock()
+	m.fmut.RLock()
 
 	var res = make(map[string]ConnectionInfo)
-	for node, conn := range m.protoConn {
+	for device, conn := range m.protoConn {
 		ci := ConnectionInfo{
 			Statistics:    conn.Statistics(),
-			ClientVersion: m.nodeVer[node],
+			ClientVersion: m.deviceVer[device],
 		}
-		if nc, ok := m.rawConn[node].(remoteAddrer); ok {
+		if nc, ok := m.rawConn[device].(remoteAddrer); ok {
 			ci.Address = nc.RemoteAddr().String()
 		}
 
-		res[node.String()] = ci
+		res[device.String()] = ci
 	}
 
-	m.rmut.RUnlock()
+	m.fmut.RUnlock()
 	m.pmut.RUnlock()
 
 	in, out := protocol.TotalInOut()
@@ -199,24 +254,24 @@ func (m *Model) ConnectionStats() map[string]ConnectionInfo {
 	return res
 }
 
-// Returns statistics about each node
-func (m *Model) NodeStatistics() map[string]stats.NodeStatistics {
-	var res = make(map[string]stats.NodeStatistics)
-	for _, node := range m.cfg.Nodes {
-		res[node.NodeID.String()] = m.nodeStatRef(node.NodeID).GetStatistics()
+// Returns statistics about each device
+func (m *Model) DeviceStatistics() map[string]stats.DeviceStatistics {
+	var res = make(map[string]stats.DeviceStatistics)
+	for id := range m.cfg.Devices() {
+		res[id.String()] = m.deviceStatRef(id).GetStatistics()
 	}
 	return res
 }
 
-// Returns the completion status, in percent, for the given node and repo.
-func (m *Model) Completion(node protocol.NodeID, repo string) float64 {
+// Returns the completion status, in percent, for the given device and folder.
+func (m *Model) Completion(device protocol.DeviceID, folder string) float64 {
 	var tot int64
 
-	m.rmut.RLock()
-	rf, ok := m.repoFiles[repo]
-	m.rmut.RUnlock()
+	m.fmut.RLock()
+	rf, ok := m.folderFiles[folder]
+	m.fmut.RUnlock()
 	if !ok {
-		return 0 // Repo doesn't exist, so we hardly have any of it
+		return 0 // Folder doesn't exist, so we hardly have any of it
 	}
 
 	rf.WithGlobalTruncated(func(f protocol.FileIntf) bool {
@@ -227,11 +282,11 @@ func (m *Model) Completion(node protocol.NodeID, repo string) float64 {
 	})
 
 	if tot == 0 {
-		return 100 // Repo is empty, so we have all of it
+		return 100 // Folder is empty, so we have all of it
 	}
 
 	var need int64
-	rf.WithNeedTruncated(node, func(f protocol.FileIntf) bool {
+	rf.WithNeedTruncated(device, func(f protocol.FileIntf) bool {
 		if !f.IsDeleted() {
 			need += f.Size()
 		}
@@ -240,7 +295,7 @@ func (m *Model) Completion(node protocol.NodeID, repo string) float64 {
 
 	res := 100 * (1 - float64(need)/float64(tot))
 	if debug {
-		l.Debugf("Completion(%s, %q): %f (%d / %d)", node, repo, res, need, tot)
+		l.Debugf("%v Completion(%s, %q): %f (%d / %d)", m, device, folder, res, need, tot)
 	}
 
 	return res
@@ -268,10 +323,10 @@ func sizeOfFile(f protocol.FileIntf) (files, deleted int, bytes int64) {
 
 // GlobalSize returns the number of files, deleted files and total bytes for all
 // files in the global model.
-func (m *Model) GlobalSize(repo string) (files, deleted int, bytes int64) {
-	m.rmut.RLock()
-	defer m.rmut.RUnlock()
-	if rf, ok := m.repoFiles[repo]; ok {
+func (m *Model) GlobalSize(folder string) (files, deleted int, bytes int64) {
+	m.fmut.RLock()
+	defer m.fmut.RUnlock()
+	if rf, ok := m.folderFiles[folder]; ok {
 		rf.WithGlobalTruncated(func(f protocol.FileIntf) bool {
 			fs, de, by := sizeOfFile(f)
 			files += fs
@@ -284,12 +339,12 @@ func (m *Model) GlobalSize(repo string) (files, deleted int, bytes int64) {
 }
 
 // LocalSize returns the number of files, deleted files and total bytes for all
-// files in the local repository.
-func (m *Model) LocalSize(repo string) (files, deleted int, bytes int64) {
-	m.rmut.RLock()
-	defer m.rmut.RUnlock()
-	if rf, ok := m.repoFiles[repo]; ok {
-		rf.WithHaveTruncated(protocol.LocalNodeID, func(f protocol.FileIntf) bool {
+// files in the local folder.
+func (m *Model) LocalSize(folder string) (files, deleted int, bytes int64) {
+	m.fmut.RLock()
+	defer m.fmut.RUnlock()
+	if rf, ok := m.folderFiles[folder]; ok {
+		rf.WithHaveTruncated(protocol.LocalDeviceID, func(f protocol.FileIntf) bool {
 			if f.IsInvalid() {
 				return true
 			}
@@ -304,11 +359,11 @@ func (m *Model) LocalSize(repo string) (files, deleted int, bytes int64) {
 }
 
 // NeedSize returns the number and total size of currently needed files.
-func (m *Model) NeedSize(repo string) (files int, bytes int64) {
-	m.rmut.RLock()
-	defer m.rmut.RUnlock()
-	if rf, ok := m.repoFiles[repo]; ok {
-		rf.WithNeedTruncated(protocol.LocalNodeID, func(f protocol.FileIntf) bool {
+func (m *Model) NeedSize(folder string) (files int, bytes int64) {
+	m.fmut.RLock()
+	defer m.fmut.RUnlock()
+	if rf, ok := m.folderFiles[folder]; ok {
+		rf.WithNeedTruncated(protocol.LocalDeviceID, func(f protocol.FileIntf) bool {
 			fs, de, by := sizeOfFile(f)
 			files += fs + de
 			bytes += by
@@ -316,20 +371,20 @@ func (m *Model) NeedSize(repo string) (files int, bytes int64) {
 		})
 	}
 	if debug {
-		l.Debugf("NeedSize(%q): %d %d", repo, files, bytes)
+		l.Debugf("%v NeedSize(%q): %d %d", m, folder, files, bytes)
 	}
 	return
 }
 
 // NeedFiles returns the list of currently needed files, stopping at maxFiles
 // files or maxBlocks blocks. Limits <= 0 are ignored.
-func (m *Model) NeedFilesRepoLimited(repo string, maxFiles, maxBlocks int) []protocol.FileInfo {
-	m.rmut.RLock()
-	defer m.rmut.RUnlock()
+func (m *Model) NeedFolderFilesLimited(folder string, maxFiles, maxBlocks int) []protocol.FileInfo {
+	m.fmut.RLock()
+	defer m.fmut.RUnlock()
 	nblocks := 0
-	if rf, ok := m.repoFiles[repo]; ok {
+	if rf, ok := m.folderFiles[folder]; ok {
 		fs := make([]protocol.FileInfo, 0, maxFiles)
-		rf.WithNeed(protocol.LocalNodeID, func(f protocol.FileIntf) bool {
+		rf.WithNeed(protocol.LocalDeviceID, func(f protocol.FileIntf) bool {
 			fi := f.(protocol.FileInfo)
 			fs = append(fs, fi)
 			nblocks += len(fi.Blocks)
@@ -340,71 +395,29 @@ func (m *Model) NeedFilesRepoLimited(repo string, maxFiles, maxBlocks int) []pro
 	return nil
 }
 
-// Index is called when a new node is connected and we receive their full index.
+// Index is called when a new device is connected and we receive their full index.
 // Implements the protocol.Model interface.
-func (m *Model) Index(nodeID protocol.NodeID, repo string, fs []protocol.FileInfo) {
+func (m *Model) Index(deviceID protocol.DeviceID, folder string, fs []protocol.FileInfo) {
 	if debug {
-		l.Debugf("IDX(in): %s %q: %d files", nodeID, repo, len(fs))
+		l.Debugf("IDX(in): %s %q: %d files", deviceID, folder, len(fs))
 	}
 
-	m.rmut.RLock()
-	files, ok := m.repoFiles[repo]
-	ignores, _ := m.repoIgnores[repo]
-	m.rmut.RUnlock()
-
-	if !ok {
-		l.Warnf("Unexpected (nonexistent) repository ID %q sent from node %q; ensure that the repository exists and that this node is selected under \"Share With\" in the repository configuration.", repo, nodeID)
-		return
-	}
-
-	if !m.repoSharedWith(repo, nodeID) {
-		events.Default.Log(events.RepoRejected, map[string]string{
-			"repo": repo,
-			"node": nodeID.String(),
+	if !m.folderSharedWith(folder, deviceID) {
+		events.Default.Log(events.FolderRejected, map[string]string{
+			"folder": folder,
+			"device": deviceID.String(),
 		})
-		l.Infof("Unexpected repository ID %q sent from node %q; ensure that the repository exists and that this node is selected under \"Share With\" in the repository configuration.", repo, nodeID)
+		l.Warnf("Unexpected folder ID %q sent from device %q; ensure that the folder exists and that this device is selected under \"Share With\" in the folder configuration.", folder, deviceID)
 		return
 	}
 
-	for i := 0; i < len(fs); {
-		lamport.Default.Tick(fs[i].Version)
-		if ignores.Match(fs[i].Name) {
-			fs[i] = fs[len(fs)-1]
-			fs = fs[:len(fs)-1]
-		} else {
-			i++
-		}
-	}
-
-	files.Replace(nodeID, fs)
-
-	events.Default.Log(events.RemoteIndexUpdated, map[string]interface{}{
-		"node":    nodeID.String(),
-		"repo":    repo,
-		"items":   len(fs),
-		"version": files.LocalVersion(nodeID),
-	})
-}
-
-// IndexUpdate is called for incremental updates to connected nodes' indexes.
-// Implements the protocol.Model interface.
-func (m *Model) IndexUpdate(nodeID protocol.NodeID, repo string, fs []protocol.FileInfo) {
-	if debug {
-		l.Debugf("IDXUP(in): %s / %q: %d files", nodeID, repo, len(fs))
-	}
-
-	if !m.repoSharedWith(repo, nodeID) {
-		l.Infof("Update for unexpected repository ID %q sent from node %q; ensure that the repository exists and that this node is selected under \"Share With\" in the repository configuration.", repo, nodeID)
-		return
-	}
-
-	m.rmut.RLock()
-	files, ok := m.repoFiles[repo]
-	ignores, _ := m.repoIgnores[repo]
-	m.rmut.RUnlock()
+	m.fmut.RLock()
+	files, ok := m.folderFiles[folder]
+	ignores, _ := m.folderIgnores[folder]
+	m.fmut.RUnlock()
 
 	if !ok {
-		l.Fatalf("IndexUpdate for nonexistant repo %q", repo)
+		l.Fatalf("Index for nonexistant folder %q", folder)
 	}
 
 	for i := 0; i < len(fs); {
@@ -417,104 +430,146 @@ func (m *Model) IndexUpdate(nodeID protocol.NodeID, repo string, fs []protocol.F
 		}
 	}
 
-	files.Update(nodeID, fs)
+	files.Replace(deviceID, fs)
 
 	events.Default.Log(events.RemoteIndexUpdated, map[string]interface{}{
-		"node":    nodeID.String(),
-		"repo":    repo,
+		"device":  deviceID.String(),
+		"folder":  folder,
 		"items":   len(fs),
-		"version": files.LocalVersion(nodeID),
+		"version": files.LocalVersion(deviceID),
 	})
 }
 
-func (m *Model) repoSharedWith(repo string, nodeID protocol.NodeID) bool {
-	m.rmut.RLock()
-	defer m.rmut.RUnlock()
-	for _, nrepo := range m.nodeRepos[nodeID] {
-		if nrepo == repo {
+// IndexUpdate is called for incremental updates to connected devices' indexes.
+// Implements the protocol.Model interface.
+func (m *Model) IndexUpdate(deviceID protocol.DeviceID, folder string, fs []protocol.FileInfo) {
+	if debug {
+		l.Debugf("%v IDXUP(in): %s / %q: %d files", m, deviceID, folder, len(fs))
+	}
+
+	if !m.folderSharedWith(folder, deviceID) {
+		l.Infof("Update for unexpected folder ID %q sent from device %q; ensure that the folder exists and that this device is selected under \"Share With\" in the folder configuration.", folder, deviceID)
+		return
+	}
+
+	m.fmut.RLock()
+	files, ok := m.folderFiles[folder]
+	ignores, _ := m.folderIgnores[folder]
+	m.fmut.RUnlock()
+
+	if !ok {
+		l.Fatalf("IndexUpdate for nonexistant folder %q", folder)
+	}
+
+	for i := 0; i < len(fs); {
+		lamport.Default.Tick(fs[i].Version)
+		if ignores.Match(fs[i].Name) {
+			fs[i] = fs[len(fs)-1]
+			fs = fs[:len(fs)-1]
+		} else {
+			i++
+		}
+	}
+
+	files.Update(deviceID, fs)
+
+	events.Default.Log(events.RemoteIndexUpdated, map[string]interface{}{
+		"device":  deviceID.String(),
+		"folder":  folder,
+		"items":   len(fs),
+		"version": files.LocalVersion(deviceID),
+	})
+}
+
+func (m *Model) folderSharedWith(folder string, deviceID protocol.DeviceID) bool {
+	m.fmut.RLock()
+	defer m.fmut.RUnlock()
+	for _, nfolder := range m.deviceFolders[deviceID] {
+		if nfolder == folder {
 			return true
 		}
 	}
 	return false
 }
 
-func (m *Model) ClusterConfig(nodeID protocol.NodeID, cm protocol.ClusterConfigMessage) {
+func (m *Model) ClusterConfig(deviceID protocol.DeviceID, cm protocol.ClusterConfigMessage) {
 	m.pmut.Lock()
 	if cm.ClientName == "syncthing" {
-		m.nodeVer[nodeID] = cm.ClientVersion
+		m.deviceVer[deviceID] = cm.ClientVersion
 	} else {
-		m.nodeVer[nodeID] = cm.ClientName + " " + cm.ClientVersion
+		m.deviceVer[deviceID] = cm.ClientName + " " + cm.ClientVersion
 	}
 	m.pmut.Unlock()
 
-	l.Infof(`Node %s client is "%s %s"`, nodeID, cm.ClientName, cm.ClientVersion)
+	l.Infof(`Device %s client is "%s %s"`, deviceID, cm.ClientName, cm.ClientVersion)
 
 	if name := cm.GetOption("name"); name != "" {
-		l.Infof("Node %s name is %q", nodeID, name)
-		node := m.cfg.GetNodeConfiguration(nodeID)
-		if node != nil && node.Name == "" {
-			node.Name = name
-			m.cfg.Save()
+		l.Infof("Device %s name is %q", deviceID, name)
+		device, ok := m.cfg.Devices()[deviceID]
+		if ok && device.Name == "" {
+			device.Name = name
+			m.cfg.SetDevice(device)
 		}
 	}
 
-	if m.cfg.GetNodeConfiguration(nodeID).Introducer {
-		// This node is an introducer. Go through the announced lists of repos
-		// and nodes and add what we are missing.
+	if m.cfg.Devices()[deviceID].Introducer {
+		// This device is an introducer. Go through the announced lists of folders
+		// and devices and add what we are missing.
 
 		var changed bool
-		for _, repo := range cm.Repositories {
-			// If we don't have this repository yet, skip it. Ideally, we'd
-			// offer up something in the GUI to create the repo, but for the
-			// moment we only handle repos that we already have.
-			if _, ok := m.repoNodes[repo.ID]; !ok {
+		for _, folder := range cm.Folders {
+			// If we don't have this folder yet, skip it. Ideally, we'd
+			// offer up something in the GUI to create the folder, but for the
+			// moment we only handle folders that we already have.
+			if _, ok := m.folderDevices[folder.ID]; !ok {
 				continue
 			}
 
-		nextNode:
-			for _, node := range repo.Nodes {
-				var id protocol.NodeID
-				copy(id[:], node.ID)
+		nextDevice:
+			for _, device := range folder.Devices {
+				var id protocol.DeviceID
+				copy(id[:], device.ID)
 
-				if m.cfg.GetNodeConfiguration(id)==nil {
-					// The node is currently unknown. Add it to the config.
+				if _, ok := m.cfg.Devices()[id]; !ok {
+					// The device is currently unknown. Add it to the config.
 
-					l.Infof("Adding node %v to config (vouched for by introducer %v)", id, nodeID)
-					newNodeCfg := config.NodeConfiguration{
-						NodeID: id,
+					l.Infof("Adding device %v to config (vouched for by introducer %v)", id, deviceID)
+					newDeviceCfg := config.DeviceConfiguration{
+						DeviceID:    id,
+						Compression: true,
 					}
 
 					// The introducers' introducers are also our introducers.
-					if node.Flags&protocol.FlagIntroducer != 0 {
-						l.Infof("Node %v is now also an introducer", id)
-						newNodeCfg.Introducer = true
+					if device.Flags&protocol.FlagIntroducer != 0 {
+						l.Infof("Device %v is now also an introducer", id)
+						newDeviceCfg.Introducer = true
 					}
 
-					m.cfg.Nodes = append(m.cfg.Nodes, newNodeCfg)
-
+					m.cfg.SetDevice(newDeviceCfg)
 					changed = true
 				}
 
-				for _, er := range m.nodeRepos[id] {
-					if er == repo.ID {
-						// We already share the repo with this node, so
+				for _, er := range m.deviceFolders[id] {
+					if er == folder.ID {
+						// We already share the folder with this device, so
 						// nothing to do.
-						continue nextNode
+						continue nextDevice
 					}
 				}
 
-				// We don't yet share this repo with this node. Add the node
-				// to sharing list of the repo.
+				// We don't yet share this folder with this device. Add the device
+				// to sharing list of the folder.
 
-				l.Infof("Adding node %v to share %q (vouched for by introducer %v)", id, repo.ID, nodeID)
+				l.Infof("Adding device %v to share %q (vouched for by introducer %v)", id, folder.ID, deviceID)
 
-				m.nodeRepos[id] = append(m.nodeRepos[id], repo.ID)
-				m.repoNodes[repo.ID] = append(m.repoNodes[repo.ID], id)
+				m.deviceFolders[id] = append(m.deviceFolders[id], folder.ID)
+				m.folderDevices[folder.ID] = append(m.folderDevices[folder.ID], id)
 
-				repoCfg := m.cfg.GetRepoConfiguration(repo.ID)
-				repoCfg.Nodes = append(repoCfg.Nodes, config.RepositoryNodeConfiguration{
-					NodeID: id,
+				folderCfg := m.cfg.Folders()[folder.ID]
+				folderCfg.Devices = append(folderCfg.Devices, config.FolderDeviceConfiguration{
+					DeviceID: id,
 				})
+				m.cfg.SetFolder(folderCfg)
 
 				changed = true
 			}
@@ -528,21 +583,21 @@ func (m *Model) ClusterConfig(nodeID protocol.NodeID, cm protocol.ClusterConfigM
 
 // Close removes the peer from the model and closes the underlying connection if possible.
 // Implements the protocol.Model interface.
-func (m *Model) Close(node protocol.NodeID, err error) {
-	l.Infof("Connection to %s closed: %v", node, err)
-	events.Default.Log(events.NodeDisconnected, map[string]string{
-		"id":    node.String(),
+func (m *Model) Close(device protocol.DeviceID, err error) {
+	l.Infof("Connection to %s closed: %v", device, err)
+	events.Default.Log(events.DeviceDisconnected, map[string]string{
+		"id":    device.String(),
 		"error": err.Error(),
 	})
 
 	m.pmut.Lock()
-	m.rmut.RLock()
-	for _, repo := range m.nodeRepos[node] {
-		m.repoFiles[repo].Replace(node, nil)
+	m.fmut.RLock()
+	for _, folder := range m.deviceFolders[device] {
+		m.folderFiles[folder].Replace(device, nil)
 	}
-	m.rmut.RUnlock()
+	m.fmut.RUnlock()
 
-	conn, ok := m.rawConn[node]
+	conn, ok := m.rawConn[device]
 	if ok {
 		if conn, ok := conn.(*tls.Conn); ok {
 			// If the underlying connection is a *tls.Conn, Close() does more
@@ -553,46 +608,46 @@ func (m *Model) Close(node protocol.NodeID, err error) {
 		}
 		conn.Close()
 	}
-	delete(m.protoConn, node)
-	delete(m.rawConn, node)
-	delete(m.nodeVer, node)
+	delete(m.protoConn, device)
+	delete(m.rawConn, device)
+	delete(m.deviceVer, device)
 	m.pmut.Unlock()
 }
 
 // Request returns the specified data segment by reading it from local disk.
 // Implements the protocol.Model interface.
-func (m *Model) Request(nodeID protocol.NodeID, repo, name string, offset int64, size int) ([]byte, error) {
+func (m *Model) Request(deviceID protocol.DeviceID, folder, name string, offset int64, size int) ([]byte, error) {
 	// Verify that the requested file exists in the local model.
-	m.rmut.RLock()
-	r, ok := m.repoFiles[repo]
-	m.rmut.RUnlock()
+	m.fmut.RLock()
+	r, ok := m.folderFiles[folder]
+	m.fmut.RUnlock()
 
 	if !ok {
-		l.Warnf("Request from %s for file %s in nonexistent repo %q", nodeID, name, repo)
+		l.Warnf("Request from %s for file %s in nonexistent folder %q", deviceID, name, folder)
 		return nil, ErrNoSuchFile
 	}
 
-	lf := r.Get(protocol.LocalNodeID, name)
+	lf := r.Get(protocol.LocalDeviceID, name)
 	if protocol.IsInvalid(lf.Flags) || protocol.IsDeleted(lf.Flags) {
 		if debug {
-			l.Debugf("REQ(in): %s: %q / %q o=%d s=%d; invalid: %v", nodeID, repo, name, offset, size, lf)
+			l.Debugf("%v REQ(in): %s: %q / %q o=%d s=%d; invalid: %v", m, deviceID, folder, name, offset, size, lf)
 		}
 		return nil, ErrInvalid
 	}
 
 	if offset > lf.Size() {
 		if debug {
-			l.Debugf("REQ(in; nonexistent): %s: %q o=%d s=%d", nodeID, name, offset, size)
+			l.Debugf("%v REQ(in; nonexistent): %s: %q o=%d s=%d", m, deviceID, name, offset, size)
 		}
 		return nil, ErrNoSuchFile
 	}
 
-	if debug && nodeID != protocol.LocalNodeID {
-		l.Debugf("REQ(in): %s: %q / %q o=%d s=%d", nodeID, repo, name, offset, size)
+	if debug && deviceID != protocol.LocalDeviceID {
+		l.Debugf("%v REQ(in): %s: %q / %q o=%d s=%d", m, deviceID, folder, name, offset, size)
 	}
-	m.rmut.RLock()
-	fn := filepath.Join(m.repoCfgs[repo].Directory, name)
-	m.rmut.RUnlock()
+	m.fmut.RLock()
+	fn := filepath.Join(m.folderCfgs[folder].Path, name)
+	m.fmut.RUnlock()
 	fd, err := os.Open(fn) // XXX: Inefficient, should cache fd?
 	if err != nil {
 		return nil, err
@@ -608,24 +663,24 @@ func (m *Model) Request(nodeID protocol.NodeID, repo, name string, offset int64,
 	return buf, nil
 }
 
-// ReplaceLocal replaces the local repository index with the given list of files.
-func (m *Model) ReplaceLocal(repo string, fs []protocol.FileInfo) {
-	m.rmut.RLock()
-	m.repoFiles[repo].ReplaceWithDelete(protocol.LocalNodeID, fs)
-	m.rmut.RUnlock()
+// ReplaceLocal replaces the local folder index with the given list of files.
+func (m *Model) ReplaceLocal(folder string, fs []protocol.FileInfo) {
+	m.fmut.RLock()
+	m.folderFiles[folder].ReplaceWithDelete(protocol.LocalDeviceID, fs)
+	m.fmut.RUnlock()
 }
 
-func (m *Model) CurrentRepoFile(repo string, file string) protocol.FileInfo {
-	m.rmut.RLock()
-	f := m.repoFiles[repo].Get(protocol.LocalNodeID, file)
-	m.rmut.RUnlock()
+func (m *Model) CurrentFolderFile(folder string, file string) protocol.FileInfo {
+	m.fmut.RLock()
+	f := m.folderFiles[folder].Get(protocol.LocalDeviceID, file)
+	m.fmut.RUnlock()
 	return f
 }
 
-func (m *Model) CurrentGlobalFile(repo string, file string) protocol.FileInfo {
-	m.rmut.RLock()
-	f := m.repoFiles[repo].GetGlobal(file)
-	m.rmut.RUnlock()
+func (m *Model) CurrentGlobalFile(folder string, file string) protocol.FileInfo {
+	m.fmut.RLock()
+	f := m.folderFiles[folder].GetGlobal(file)
+	m.fmut.RUnlock()
 	return f
 }
 
@@ -636,32 +691,32 @@ type cFiler struct {
 
 // Implements scanner.CurrentFiler
 func (cf cFiler) CurrentFile(file string) protocol.FileInfo {
-	return cf.m.CurrentRepoFile(cf.r, file)
+	return cf.m.CurrentFolderFile(cf.r, file)
 }
 
-// ConnectedTo returns true if we are connected to the named node.
-func (m *Model) ConnectedTo(nodeID protocol.NodeID) bool {
+// ConnectedTo returns true if we are connected to the named device.
+func (m *Model) ConnectedTo(deviceID protocol.DeviceID) bool {
 	m.pmut.RLock()
-	_, ok := m.protoConn[nodeID]
+	_, ok := m.protoConn[deviceID]
 	m.pmut.RUnlock()
 	if ok {
-		m.nodeWasSeen(nodeID)
+		m.deviceWasSeen(deviceID)
 	}
 	return ok
 }
 
-func (m *Model) GetIgnores(repo string) ([]string, error) {
+func (m *Model) GetIgnores(folder string) ([]string, error) {
 	var lines []string
 
-	cfg, ok := m.repoCfgs[repo]
+	cfg, ok := m.folderCfgs[folder]
 	if !ok {
-		return lines, fmt.Errorf("Repo %s does not exist", repo)
+		return lines, fmt.Errorf("Folder %s does not exist", folder)
 	}
 
-	m.rmut.Lock()
-	defer m.rmut.Unlock()
+	m.fmut.Lock()
+	defer m.fmut.Unlock()
 
-	fd, err := os.Open(filepath.Join(cfg.Directory, ".stignore"))
+	fd, err := os.Open(filepath.Join(cfg.Path, ".stignore"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return lines, nil
@@ -679,13 +734,13 @@ func (m *Model) GetIgnores(repo string) ([]string, error) {
 	return lines, nil
 }
 
-func (m *Model) SetIgnores(repo string, content []string) error {
-	cfg, ok := m.repoCfgs[repo]
+func (m *Model) SetIgnores(folder string, content []string) error {
+	cfg, ok := m.folderCfgs[folder]
 	if !ok {
-		return fmt.Errorf("Repo %s does not exist", repo)
+		return fmt.Errorf("Folder %s does not exist", folder)
 	}
 
-	fd, err := ioutil.TempFile(cfg.Directory, ".syncthing.stignore-"+repo)
+	fd, err := ioutil.TempFile(cfg.Path, ".syncthing.stignore-"+folder)
 	if err != nil {
 		l.Warnln("Saving .stignore:", err)
 		return err
@@ -706,99 +761,97 @@ func (m *Model) SetIgnores(repo string, content []string) error {
 		return err
 	}
 
-	file := filepath.Join(cfg.Directory, ".stignore")
+	file := filepath.Join(cfg.Path, ".stignore")
 	err = osutil.Rename(fd.Name(), file)
 	if err != nil {
 		l.Warnln("Saving .stignore:", err)
 		return err
 	}
 
-	return m.ScanRepo(repo)
+	return m.ScanFolder(folder)
 }
 
 // AddConnection adds a new peer connection to the model. An initial index will
 // be sent to the connected peer, thereafter index updates whenever the local
-// repository changes.
+// folder changes.
 func (m *Model) AddConnection(rawConn io.Closer, protoConn protocol.Connection) {
-	nodeID := protoConn.ID()
+	deviceID := protoConn.ID()
 
 	m.pmut.Lock()
-	if _, ok := m.protoConn[nodeID]; ok {
-		panic("add existing node")
+	if _, ok := m.protoConn[deviceID]; ok {
+		panic("add existing device")
 	}
-	m.protoConn[nodeID] = protoConn
-	if _, ok := m.rawConn[nodeID]; ok {
-		panic("add existing node")
+	m.protoConn[deviceID] = protoConn
+	if _, ok := m.rawConn[deviceID]; ok {
+		panic("add existing device")
 	}
-	m.rawConn[nodeID] = rawConn
+	m.rawConn[deviceID] = rawConn
 
-	cm := m.clusterConfig(nodeID)
+	cm := m.clusterConfig(deviceID)
 	protoConn.ClusterConfig(cm)
 
-	m.rmut.RLock()
-	for _, repo := range m.nodeRepos[nodeID] {
-		fs := m.repoFiles[repo]
-		go sendIndexes(protoConn, repo, fs, m.repoIgnores[repo])
+	m.fmut.RLock()
+	for _, folder := range m.deviceFolders[deviceID] {
+		fs := m.folderFiles[folder]
+		go sendIndexes(protoConn, folder, fs, m.folderIgnores[folder])
 	}
-	m.rmut.RUnlock()
+	m.fmut.RUnlock()
 	m.pmut.Unlock()
 
-	m.nodeWasSeen(nodeID)
+	m.deviceWasSeen(deviceID)
 }
 
-func (m *Model) nodeStatRef(nodeID protocol.NodeID) *stats.NodeStatisticsReference {
-	m.rmut.Lock()
-	defer m.rmut.Unlock()
+func (m *Model) deviceStatRef(deviceID protocol.DeviceID) *stats.DeviceStatisticsReference {
+	m.fmut.Lock()
+	defer m.fmut.Unlock()
 
-	if sr, ok := m.nodeStatRefs[nodeID]; ok {
+	if sr, ok := m.deviceStatRefs[deviceID]; ok {
 		return sr
 	} else {
-		sr = stats.NewNodeStatisticsReference(m.db, nodeID)
-		m.nodeStatRefs[nodeID] = sr
+		sr = stats.NewDeviceStatisticsReference(m.db, deviceID)
+		m.deviceStatRefs[deviceID] = sr
 		return sr
 	}
 }
 
-func (m *Model) nodeWasSeen(nodeID protocol.NodeID) {
-	m.nodeStatRef(nodeID).WasSeen()
+func (m *Model) deviceWasSeen(deviceID protocol.DeviceID) {
+	m.deviceStatRef(deviceID).WasSeen()
 }
 
-func sendIndexes(conn protocol.Connection, repo string, fs *files.Set, ignores ignore.Patterns) {
-	nodeID := conn.ID()
+func sendIndexes(conn protocol.Connection, folder string, fs *files.Set, ignores ignore.Patterns) {
+	deviceID := conn.ID()
 	name := conn.Name()
 	var err error
 
 	if debug {
-		l.Debugf("sendIndexes for %s-%s@/%q starting", nodeID, name, repo)
+		l.Debugf("sendIndexes for %s-%s/%q starting", deviceID, name, folder)
 	}
 
-	defer func() {
-		if debug {
-			l.Debugf("sendIndexes for %s-%s@/%q exiting: %v", nodeID, name, repo, err)
-		}
-	}()
-
-	minLocalVer, err := sendIndexTo(true, 0, conn, repo, fs, ignores)
+	minLocalVer, err := sendIndexTo(true, 0, conn, folder, fs, ignores)
 
 	for err == nil {
 		time.Sleep(5 * time.Second)
-		if fs.LocalVersion(protocol.LocalNodeID) <= minLocalVer {
+		if fs.LocalVersion(protocol.LocalDeviceID) <= minLocalVer {
 			continue
 		}
 
-		minLocalVer, err = sendIndexTo(false, minLocalVer, conn, repo, fs, ignores)
+		minLocalVer, err = sendIndexTo(false, minLocalVer, conn, folder, fs, ignores)
+	}
+
+	if debug {
+		l.Debugf("sendIndexes for %s-%s/%q exiting: %v", deviceID, name, folder, err)
 	}
 }
 
-func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, repo string, fs *files.Set, ignores ignore.Patterns) (uint64, error) {
-	nodeID := conn.ID()
+func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, folder string, fs *files.Set, ignores ignore.Patterns) (uint64, error) {
+	deviceID := conn.ID()
 	name := conn.Name()
 	batch := make([]protocol.FileInfo, 0, indexBatchSize)
 	currentBatchSize := 0
 	maxLocalVer := uint64(0)
 	var err error
 
-	fs.WithHave(protocol.LocalNodeID, func(fi protocol.FileIntf) bool {
+	fs.WithHave(protocol.LocalDeviceID, func(fi protocol.FileIntf) bool {
 		f := fi.(protocol.FileInfo)
 		if f.LocalVersion <= minLocalVer {
 			return true
@@ -814,19 +867,19 @@ func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, rep
 
 		if len(batch) == indexBatchSize || currentBatchSize > indexTargetSize {
 			if initial {
-				if err = conn.Index(repo, batch); err != nil {
+				if err = conn.Index(folder, batch); err != nil {
 					return false
 				}
 				if debug {
-					l.Debugf("sendIndexes for %s-%s/%q: %d files (<%d bytes) (initial index)", nodeID, name, repo, len(batch), currentBatchSize)
+					l.Debugf("sendIndexes for %s-%s/%q: %d files (<%d bytes) (initial index)", deviceID, name, folder, len(batch), currentBatchSize)
 				}
 				initial = false
 			} else {
-				if err = conn.IndexUpdate(repo, batch); err != nil {
+				if err = conn.IndexUpdate(folder, batch); err != nil {
 					return false
 				}
 				if debug {
-					l.Debugf("sendIndexes for %s-%s/%q: %d files (<%d bytes) (batched update)", nodeID, name, repo, len(batch), currentBatchSize)
+					l.Debugf("sendIndexes for %s-%s/%q: %d files (<%d bytes) (batched update)", deviceID, name, folder, len(batch), currentBatchSize)
 				}
 			}
 
@@ -840,27 +893,27 @@ func sendIndexTo(initial bool, minLocalVer uint64, conn protocol.Connection, rep
 	})
 
 	if initial && err == nil {
-		err = conn.Index(repo, batch)
+		err = conn.Index(folder, batch)
 		if debug && err == nil {
-			l.Debugf("sendIndexes for %s-%s/%q: %d files (small initial index)", nodeID, name, repo, len(batch))
+			l.Debugf("sendIndexes for %s-%s/%q: %d files (small initial index)", deviceID, name, folder, len(batch))
 		}
 	} else if len(batch) > 0 && err == nil {
-		err = conn.IndexUpdate(repo, batch)
+		err = conn.IndexUpdate(folder, batch)
 		if debug && err == nil {
-			l.Debugf("sendIndexes for %s-%s/%q: %d files (last batch)", nodeID, name, repo, len(batch))
+			l.Debugf("sendIndexes for %s-%s/%q: %d files (last batch)", deviceID, name, folder, len(batch))
 		}
 	}
 
 	return maxLocalVer, err
 }
 
-func (m *Model) updateLocal(repo string, f protocol.FileInfo) {
+func (m *Model) updateLocal(folder string, f protocol.FileInfo) {
 	f.LocalVersion = 0
-	m.rmut.RLock()
-	m.repoFiles[repo].Update(protocol.LocalNodeID, []protocol.FileInfo{f})
-	m.rmut.RUnlock()
+	m.fmut.RLock()
+	m.folderFiles[folder].Update(protocol.LocalDeviceID, []protocol.FileInfo{f})
+	m.fmut.RUnlock()
 	events.Default.Log(events.LocalIndexUpdated, map[string]interface{}{
-		"repo":     repo,
+		"folder":   folder,
 		"name":     f.Name,
 		"modified": time.Unix(f.Modified, 0),
 		"flags":    fmt.Sprintf("0%o", f.Flags),
@@ -868,60 +921,60 @@ func (m *Model) updateLocal(repo string, f protocol.FileInfo) {
 	})
 }
 
-func (m *Model) requestGlobal(nodeID protocol.NodeID, repo, name string, offset int64, size int, hash []byte) ([]byte, error) {
+func (m *Model) requestGlobal(deviceID protocol.DeviceID, folder, name string, offset int64, size int, hash []byte) ([]byte, error) {
 	m.pmut.RLock()
-	nc, ok := m.protoConn[nodeID]
+	nc, ok := m.protoConn[deviceID]
 	m.pmut.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("requestGlobal: no such node: %s", nodeID)
+		return nil, fmt.Errorf("requestGlobal: no such device: %s", deviceID)
 	}
 
 	if debug {
-		l.Debugf("REQ(out): %s: %q / %q o=%d s=%d h=%x", nodeID, repo, name, offset, size, hash)
+		l.Debugf("%v REQ(out): %s: %q / %q o=%d s=%d h=%x", m, deviceID, folder, name, offset, size, hash)
 	}
 
-	return nc.Request(repo, name, offset, size)
+	return nc.Request(folder, name, offset, size)
 }
 
-func (m *Model) AddRepo(cfg config.RepositoryConfiguration) {
+func (m *Model) AddFolder(cfg config.FolderConfiguration) {
 	if m.started {
-		panic("cannot add repo to started model")
+		panic("cannot add folder to started model")
 	}
 	if len(cfg.ID) == 0 {
-		panic("cannot add empty repo id")
+		panic("cannot add empty folder id")
 	}
 
-	m.rmut.Lock()
-	m.repoCfgs[cfg.ID] = cfg
-	m.repoFiles[cfg.ID] = files.NewSet(cfg.ID, m.db)
+	m.fmut.Lock()
+	m.folderCfgs[cfg.ID] = cfg
+	m.folderFiles[cfg.ID] = files.NewSet(cfg.ID, m.db)
 
-	m.repoNodes[cfg.ID] = make([]protocol.NodeID, len(cfg.Nodes))
-	for i, node := range cfg.Nodes {
-		m.repoNodes[cfg.ID][i] = node.NodeID
-		m.nodeRepos[node.NodeID] = append(m.nodeRepos[node.NodeID], cfg.ID)
+	m.folderDevices[cfg.ID] = make([]protocol.DeviceID, len(cfg.Devices))
+	for i, device := range cfg.Devices {
+		m.folderDevices[cfg.ID][i] = device.DeviceID
+		m.deviceFolders[device.DeviceID] = append(m.deviceFolders[device.DeviceID], cfg.ID)
 	}
 
-	m.addedRepo = true
-	m.rmut.Unlock()
+	m.addedFolder = true
+	m.fmut.Unlock()
 }
 
-func (m *Model) ScanRepos() {
-	m.rmut.RLock()
-	var repos = make([]string, 0, len(m.repoCfgs))
-	for repo := range m.repoCfgs {
-		repos = append(repos, repo)
+func (m *Model) ScanFolders() {
+	m.fmut.RLock()
+	var folders = make([]string, 0, len(m.folderCfgs))
+	for folder := range m.folderCfgs {
+		folders = append(folders, folder)
 	}
-	m.rmut.RUnlock()
+	m.fmut.RUnlock()
 
 	var wg sync.WaitGroup
-	wg.Add(len(repos))
-	for _, repo := range repos {
-		repo := repo
+	wg.Add(len(folders))
+	for _, folder := range folders {
+		folder := folder
 		go func() {
-			err := m.ScanRepo(repo)
+			err := m.ScanFolder(folder)
 			if err != nil {
-				invalidateRepo(m.cfg, repo, err)
+				m.cfg.InvalidateFolder(folder, err.Error())
 			}
 			wg.Done()
 		}()
@@ -929,60 +982,37 @@ func (m *Model) ScanRepos() {
 	wg.Wait()
 }
 
-func (m *Model) CleanRepos() {
-	m.rmut.RLock()
-	var dirs = make([]string, 0, len(m.repoCfgs))
-	for _, cfg := range m.repoCfgs {
-		dirs = append(dirs, cfg.Directory)
-	}
-	m.rmut.RUnlock()
-
-	var wg sync.WaitGroup
-	wg.Add(len(dirs))
-	for _, dir := range dirs {
-		w := &scanner.Walker{
-			Dir:       dir,
-			TempNamer: defTempNamer,
-		}
-		go func() {
-			w.CleanTempFiles()
-			wg.Done()
-		}()
-	}
-	wg.Wait()
+func (m *Model) ScanFolder(folder string) error {
+	return m.ScanFolderSub(folder, "")
 }
 
-func (m *Model) ScanRepo(repo string) error {
-	return m.ScanRepoSub(repo, "")
-}
-
-func (m *Model) ScanRepoSub(repo, sub string) error {
-	if p := filepath.Clean(filepath.Join(repo, sub)); !strings.HasPrefix(p, repo) {
+func (m *Model) ScanFolderSub(folder, sub string) error {
+	if p := filepath.Clean(filepath.Join(folder, sub)); !strings.HasPrefix(p, folder) {
 		return errors.New("invalid subpath")
 	}
 
-	m.rmut.RLock()
-	fs, ok := m.repoFiles[repo]
-	dir := m.repoCfgs[repo].Directory
+	m.fmut.RLock()
+	fs, ok := m.folderFiles[folder]
+	dir := m.folderCfgs[folder].Path
 
 	ignores, _ := ignore.Load(filepath.Join(dir, ".stignore"))
-	m.repoIgnores[repo] = ignores
+	m.folderIgnores[folder] = ignores
 
 	w := &scanner.Walker{
 		Dir:          dir,
 		Sub:          sub,
 		Ignores:      ignores,
-		BlockSize:    scanner.StandardBlockSize,
+		BlockSize:    protocol.BlockSize,
 		TempNamer:    defTempNamer,
-		CurrentFiler: cFiler{m, repo},
-		IgnorePerms:  m.repoCfgs[repo].IgnorePerms,
+		CurrentFiler: cFiler{m, folder},
+		IgnorePerms:  m.folderCfgs[folder].IgnorePerms,
 	}
-	m.rmut.RUnlock()
+	m.fmut.RUnlock()
 	if !ok {
-		return errors.New("no such repo")
+		return errors.New("no such folder")
 	}
 
-	m.setState(repo, RepoScanning)
+	m.setState(folder, FolderScanning)
 	fchan, err := w.Walk()
 
 	if err != nil {
@@ -992,26 +1022,26 @@ func (m *Model) ScanRepoSub(repo, sub string) error {
 	batch := make([]protocol.FileInfo, 0, 00)
 	for f := range fchan {
 		events.Default.Log(events.LocalIndexUpdated, map[string]interface{}{
-			"repo":     repo,
+			"folder":   folder,
 			"name":     f.Name,
 			"modified": time.Unix(f.Modified, 0),
 			"flags":    fmt.Sprintf("0%o", f.Flags),
 			"size":     f.Size(),
 		})
 		if len(batch) == batchSize {
-			fs.Update(protocol.LocalNodeID, batch)
+			fs.Update(protocol.LocalDeviceID, batch)
 			batch = batch[:0]
 		}
 		batch = append(batch, f)
 	}
 	if len(batch) > 0 {
-		fs.Update(protocol.LocalNodeID, batch)
+		fs.Update(protocol.LocalDeviceID, batch)
 	}
 
 	batch = batch[:0]
 	// TODO: We should limit the Have scanning to start at sub
 	seenPrefix := false
-	fs.WithHaveTruncated(protocol.LocalNodeID, func(fi protocol.FileIntf) bool {
+	fs.WithHaveTruncated(protocol.LocalDeviceID, func(fi protocol.FileIntf) bool {
 		f := fi.(protocol.FileInfoTruncated)
 		if !strings.HasPrefix(f.Name, sub) {
 			// Return true so that we keep iterating, until we get to the part
@@ -1027,7 +1057,7 @@ func (m *Model) ScanRepoSub(repo, sub string) error {
 			}
 
 			if len(batch) == batchSize {
-				fs.Update(protocol.LocalNodeID, batch)
+				fs.Update(protocol.LocalDeviceID, batch)
 				batch = batch[:0]
 			}
 
@@ -1040,7 +1070,7 @@ func (m *Model) ScanRepoSub(repo, sub string) error {
 					Version:  f.Version, // The file is still the same, so don't bump version
 				}
 				events.Default.Log(events.LocalIndexUpdated, map[string]interface{}{
-					"repo":     repo,
+					"folder":   folder,
 					"name":     f.Name,
 					"modified": time.Unix(f.Modified, 0),
 					"flags":    fmt.Sprintf("0%o", f.Flags),
@@ -1056,7 +1086,7 @@ func (m *Model) ScanRepoSub(repo, sub string) error {
 					Version:  lamport.Default.Tick(f.Version),
 				}
 				events.Default.Log(events.LocalIndexUpdated, map[string]interface{}{
-					"repo":     repo,
+					"folder":   folder,
 					"name":     f.Name,
 					"modified": time.Unix(f.Modified, 0),
 					"flags":    fmt.Sprintf("0%o", f.Flags),
@@ -1068,62 +1098,62 @@ func (m *Model) ScanRepoSub(repo, sub string) error {
 		return true
 	})
 	if len(batch) > 0 {
-		fs.Update(protocol.LocalNodeID, batch)
+		fs.Update(protocol.LocalDeviceID, batch)
 	}
 
-	m.setState(repo, RepoIdle)
+	m.setState(folder, FolderIdle)
 	return nil
 }
 
-// clusterConfig returns a ClusterConfigMessage that is correct for the given peer node
-func (m *Model) clusterConfig(node protocol.NodeID) protocol.ClusterConfigMessage {
+// clusterConfig returns a ClusterConfigMessage that is correct for the given peer device
+func (m *Model) clusterConfig(device protocol.DeviceID) protocol.ClusterConfigMessage {
 	cm := protocol.ClusterConfigMessage{
 		ClientName:    m.clientName,
 		ClientVersion: m.clientVersion,
 		Options: []protocol.Option{
 			{
 				Key:   "name",
-				Value: m.nodeName,
+				Value: m.deviceName,
 			},
 		},
 	}
 
-	m.rmut.RLock()
-	for _, repo := range m.nodeRepos[node] {
-		cr := protocol.Repository{
-			ID: repo,
+	m.fmut.RLock()
+	for _, folder := range m.deviceFolders[device] {
+		cr := protocol.Folder{
+			ID: folder,
 		}
-		for _, node := range m.repoNodes[repo] {
-			// NodeID is a value type, but with an underlying array. Copy it
-			// so we don't grab aliases to the same array later on in node[:]
-			node := node
+		for _, device := range m.folderDevices[folder] {
+			// DeviceID is a value type, but with an underlying array. Copy it
+			// so we don't grab aliases to the same array later on in device[:]
+			device := device
 			// TODO: Set read only bit when relevant
-			cn := protocol.Node{
-				ID:    node[:],
+			cn := protocol.Device{
+				ID:    device[:],
 				Flags: protocol.FlagShareTrusted,
 			}
-			if nodeCfg := m.cfg.GetNodeConfiguration(node); nodeCfg.Introducer {
+			if deviceCfg := m.cfg.Devices()[device]; deviceCfg.Introducer {
 				cn.Flags |= protocol.FlagIntroducer
 			}
-			cr.Nodes = append(cr.Nodes, cn)
+			cr.Devices = append(cr.Devices, cn)
 		}
-		cm.Repositories = append(cm.Repositories, cr)
+		cm.Folders = append(cm.Folders, cr)
 	}
-	m.rmut.RUnlock()
+	m.fmut.RUnlock()
 
 	return cm
 }
 
-func (m *Model) setState(repo string, state repoState) {
+func (m *Model) setState(folder string, state folderState) {
 	m.smut.Lock()
-	oldState := m.repoState[repo]
-	changed, ok := m.repoStateChanged[repo]
+	oldState := m.folderState[folder]
+	changed, ok := m.folderStateChanged[folder]
 	if state != oldState {
-		m.repoState[repo] = state
-		m.repoStateChanged[repo] = time.Now()
+		m.folderState[folder] = state
+		m.folderStateChanged[folder] = time.Now()
 		eventData := map[string]interface{}{
-			"repo": repo,
-			"to":   state.String(),
+			"folder": folder,
+			"to":     state.String(),
 		}
 		if ok {
 			eventData["duration"] = time.Since(changed).Seconds()
@@ -1134,29 +1164,29 @@ func (m *Model) setState(repo string, state repoState) {
 	m.smut.Unlock()
 }
 
-func (m *Model) State(repo string) (string, time.Time) {
+func (m *Model) State(folder string) (string, time.Time) {
 	m.smut.RLock()
-	state := m.repoState[repo]
-	changed := m.repoStateChanged[repo]
+	state := m.folderState[folder]
+	changed := m.folderStateChanged[folder]
 	m.smut.RUnlock()
 	return state.String(), changed
 }
 
-func (m *Model) Override(repo string) {
-	m.rmut.RLock()
-	fs := m.repoFiles[repo]
-	m.rmut.RUnlock()
+func (m *Model) Override(folder string) {
+	m.fmut.RLock()
+	fs := m.folderFiles[folder]
+	m.fmut.RUnlock()
 
-	m.setState(repo, RepoScanning)
+	m.setState(folder, FolderScanning)
 	batch := make([]protocol.FileInfo, 0, indexBatchSize)
-	fs.WithNeed(protocol.LocalNodeID, func(fi protocol.FileIntf) bool {
+	fs.WithNeed(protocol.LocalDeviceID, func(fi protocol.FileIntf) bool {
 		need := fi.(protocol.FileInfo)
 		if len(batch) == indexBatchSize {
-			fs.Update(protocol.LocalNodeID, batch)
+			fs.Update(protocol.LocalDeviceID, batch)
 			batch = batch[:0]
 		}
 
-		have := fs.Get(protocol.LocalNodeID, need.Name)
+		have := fs.Get(protocol.LocalDeviceID, need.Name)
 		if have.Name != need.Name {
 			// We are missing the file
 			need.Flags |= protocol.FlagDeleted
@@ -1171,27 +1201,58 @@ func (m *Model) Override(repo string) {
 		return true
 	})
 	if len(batch) > 0 {
-		fs.Update(protocol.LocalNodeID, batch)
+		fs.Update(protocol.LocalDeviceID, batch)
 	}
-	m.setState(repo, RepoIdle)
+	m.setState(folder, FolderIdle)
 }
 
-// Version returns the change version for the given repository. This is
-// guaranteed to increment if the contents of the local or global repository
-// has changed.
-func (m *Model) LocalVersion(repo string) uint64 {
-	m.rmut.Lock()
-	defer m.rmut.Unlock()
+// CurrentLocalVersion returns the change version for the given folder.
+// This is guaranteed to increment if the contents of the local folder has
+// changed.
+func (m *Model) CurrentLocalVersion(folder string) uint64 {
+	m.fmut.Lock()
+	defer m.fmut.Unlock()
 
-	fs, ok := m.repoFiles[repo]
+	fs, ok := m.folderFiles[folder]
 	if !ok {
-		panic("bug: LocalVersion called for nonexistent repo " + repo)
+		panic("bug: LocalVersion called for nonexistent folder " + folder)
 	}
 
-	ver := fs.LocalVersion(protocol.LocalNodeID)
-	for _, n := range m.repoNodes[repo] {
+	return fs.LocalVersion(protocol.LocalDeviceID)
+}
+
+// RemoteLocalVersion returns the change version for the given folder, as
+// sent by remote peers. This is guaranteed to increment if the contents of
+// the remote or global folder has changed.
+func (m *Model) RemoteLocalVersion(folder string) uint64 {
+	m.fmut.Lock()
+	defer m.fmut.Unlock()
+
+	fs, ok := m.folderFiles[folder]
+	if !ok {
+		panic("bug: LocalVersion called for nonexistent folder " + folder)
+	}
+
+	var ver uint64
+	for _, n := range m.folderDevices[folder] {
 		ver += fs.LocalVersion(n)
 	}
 
 	return ver
+}
+
+func (m *Model) availability(folder string, file string) []protocol.DeviceID {
+	m.fmut.Lock()
+	defer m.fmut.Unlock()
+
+	fs, ok := m.folderFiles[folder]
+	if !ok {
+		return nil
+	}
+
+	return fs.Availability(file)
+}
+
+func (m *Model) String() string {
+	return fmt.Sprintf("model@%p", m)
 }
