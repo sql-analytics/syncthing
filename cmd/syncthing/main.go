@@ -223,6 +223,15 @@ func main() {
 		return
 	}
 
+	confDir = expandTilde(confDir)
+
+	if info, err := os.Stat(confDir); err == nil && !info.IsDir() {
+		l.Fatalln("Config directory", confDir, "is not a directory")
+	}
+
+	// Ensure that our home directory exists.
+	ensureDir(confDir, 0700)
+
 	if doUpgrade || doUpgradeCheck {
 		rel, err := upgrade.LatestRelease(strings.Contains(Version, "-beta"))
 		if err != nil {
@@ -237,6 +246,12 @@ func main() {
 		l.Infof("Upgrade available (current %q < latest %q)", Version, rel.Tag)
 
 		if doUpgrade {
+			// Use leveldb database locks to protect against concurrent upgrades
+			_, err = leveldb.OpenFile(filepath.Join(confDir, "index"), &opt.Options{CachedOpenFiles: 100})
+			if err != nil {
+				l.Fatalln("Cannot upgrade, database seems to be locked. Is another copy of Syncthing already running?")
+			}
+
 			err = upgrade.UpgradeTo(rel, GoArchExtra)
 			if err != nil {
 				l.Fatalln("Upgrade:", err) // exits 1
@@ -251,12 +266,6 @@ func main() {
 	if reset {
 		resetRepositories()
 		return
-	}
-
-	confDir = expandTilde(confDir)
-
-	if info, err := os.Stat(confDir); err == nil && !info.IsDir() {
-		l.Fatalln("Config directory", confDir, "is not a directory")
 	}
 
 	if os.Getenv("STNORESTART") != "" {
@@ -300,9 +309,7 @@ func syncthingMain() {
 		}
 	}
 
-	// Ensure that our home directory exists and that we have a certificate and key.
-
-	ensureDir(confDir, 0700)
+	// Ensure that that we have a certificate and key.
 	cert, err = loadCert(confDir, "")
 	if err != nil {
 		newCertificate(confDir, "")
@@ -431,8 +438,8 @@ nextRepo:
 		if repo.Invalid != "" {
 			continue
 		}
-
 		repo.Directory = expandTilde(repo.Directory)
+		m.AddRepo(repo)
 
 		fi, err := os.Stat(repo.Directory)
 		if m.LocalVersion(repo.ID) > 0 {
@@ -458,8 +465,6 @@ nextRepo:
 			cfg.Repositories[i].Invalid = err.Error()
 			continue nextRepo
 		}
-
-		m.AddRepo(repo)
 	}
 
 	// GUI
@@ -489,13 +494,15 @@ nextRepo:
 				proto = "https"
 			}
 
-			l.Infof("Starting web GUI on %s://%s/", proto, net.JoinHostPort(hostShow, strconv.Itoa(addr.Port)))
+			urlShow := fmt.Sprintf("%s://%s/", proto, net.JoinHostPort(hostShow, strconv.Itoa(addr.Port)))
+			l.Infoln("Starting web GUI on", urlShow)
 			err := startGUI(guiCfg, os.Getenv("STGUIASSETS"), m)
 			if err != nil {
 				l.Fatalln("Cannot start GUI:", err)
 			}
 			if !noBrowser && cfg.Options.StartBrowser && len(os.Getenv("STRESTART")) == 0 {
-				openURL(fmt.Sprintf("%s://%s:%d", proto, hostOpen, addr.Port))
+				urlOpen := fmt.Sprintf("%s://%s/", proto, net.JoinHostPort(hostOpen, strconv.Itoa(addr.Port)))
+				openURL(urlOpen)
 			}
 		}
 	}

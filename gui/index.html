@@ -258,6 +258,11 @@
                       <td translate ng-if="nodeCfg.Compression" class="text-right">Yes</td>
                       <td translate ng-if="!nodeCfg.Compression" class="text-right">No</td>
                     </tr>
+                    <tr>
+                      <th><span class="glyphicon glyphicon-thumbs-up"></span>&emsp;<span translate>Introducer</span></th>
+                      <td translate ng-if="nodeCfg.Introducer" class="text-right">Yes</td>
+                      <td translate ng-if="!nodeCfg.Introducer" class="text-right">No</td>
+                    </tr>
                     <tr ng-if="connections[nodeCfg.NodeID]">
                       <th><span class="glyphicon glyphicon-tag"></span>&emsp;<span translate>Version</span></th>
                       <td class="text-right">{{connections[nodeCfg.NodeID].ClientVersion}}</td>
@@ -386,6 +391,15 @@
                 <label>
                   <input type="checkbox" ng-model="currentNode.Compression"> <span translate>Use Compression</span>
                 </label>
+                <p translate class="help-block">Compression is recommended in most setups.</p>
+              </div>
+            </div>
+            <div ng-if="!editingSelf" class="form-group">
+              <div class="checkbox">
+                <label>
+                  <input type="checkbox" ng-model="currentNode.Introducer"> <span translate>Introducer</span>
+                </label>
+                <p translate class="help-block">Any nodes configured on an introducer node will be added to this node as well.</p>
               </div>
             </div>
           </form>
@@ -520,6 +534,38 @@
           <button type="button" class="btn btn-primary btn-sm" ng-click="saveRepo()" ng-disabled="repoEditor.$invalid"><span class="glyphicon glyphicon-ok"></span>&emsp;<span translate>Save</span></button>
           <button type="button" class="btn btn-default btn-sm" data-dismiss="modal"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Close</span></button>
           <button ng-if="editingExisting" type="button" class="btn btn-danger pull-left btn-sm" ng-click="deleteRepo()"><span class="glyphicon glyphicon-minus"></span>&emsp;<span translate>Delete</span></button>
+          <button id="editIgnoresButton" ng-if="editingExisting" type="button" class="btn btn-default pull-left btn-sm" ng-click="editIgnores()"><span class="glyphicon glyphicon-eye-close"></span>&emsp;<span translate>Ignore Patterns</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ignores editor modal -->
+
+  <div id="editIgnores" class="modal fade" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title" translate>Ignore Patterns</h4>
+        </div>
+        <div class="modal-body">
+          <p translate>Enter ignore patterns, one per line.</p>
+          <textarea class="form-control" rows="15"></textarea>
+
+          <hr/>
+
+          <p class="small"><span translate>Quick guide to supported patterns</span> (<a href="https://discourse.syncthing.net/t/80" translate>full documentation</a>):</p>
+          <dl class="dl-horizontal dl-narrow small">
+            <dt><code>!</code></dt> <dd><span translate>Inversion of the given condition (i.e. do not exclude)</span></dd>
+            <dt><code>*</code></dt> <dd><span translate>Single level wildcard (matches within a directory only)</span></dd>
+            <dt><code>**</code></dt> <dd><span translate>Multi level wildcard (matches multiple directory levels)</span></dd>
+            <dt><code>//</code></dt> <dd><span translate>Comment, when used at the start of a line</span></dd>
+          </dl>
+        </div>
+        <div class="modal-footer">
+          <div class="pull-left"><span translate>Editing</span> <code>{{currentRepo.Directory}}/.stignore</code></div>
+          <button type="button" class="btn btn-primary btn-sm" data-dismiss="modal" ng-click="saveIgnores()"><span class="glyphicon glyphicon-ok"></span>&emsp;<span translate>Save</span></button>
+          <button type="button" class="btn btn-default btn-sm" data-dismiss="modal"><span class="glyphicon glyphicon-remove"></span>&emsp;<span translate>Close</span></button>
         </div>
       </div>
     </div>

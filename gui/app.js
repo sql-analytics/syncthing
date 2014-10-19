@@ -9,9 +9,6 @@
 
 var syncthing = angular.module('syncthing', ['pascalprecht.translate']);
 var urlbase = 'rest';
-var requestTimeout = 300000; // Retry the REST request after 5 minutes without reply
-var refreshTimeout = 5000; // Do not refresh the generic status faster than 5 seconds
-var refreshQuickTimeout = 500; // Do not refresh the quick stats faster than 500 milliseconds
 
 syncthing.config(function ($httpProvider, $translateProvider) {
     $httpProvider.defaults.xsrfHeaderName = 'X-CSRF-Token';
@@ -311,19 +308,19 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         $('#incomingRepo').modal();
     });
 
-    var nextCall = {};
+    var debouncedFuncs = {};
 
     function refreshRepo(repo) {
         var key = "refreshRepo" + repo;
-        if (nextCall[key] && nextCall[key] > Date.now()) {
-            return;
+        if (!debouncedFuncs[key]) {
+            debouncedFuncs[key] = debounce(function () {
+                $http.get(urlbase + '/model?repo=' + encodeURIComponent(repo)).success(function (data) {
+                    $scope.model[repo] = data;
+                    console.log("refreshRepo", repo, data);
+                });
+            }, 1000, true);
         }
-        nextCall[key] = Date.now() + requestTimeout;
-        $http.get(urlbase + '/model?repo=' + encodeURIComponent(repo)).success(function (data) {
-            nextCall[key] = Date.now() + refreshTimeout;
-            $scope.model[repo] = data;
-            console.log("refreshRepo", repo, data);
-        });
+        debouncedFuncs[key]();
     }
 
     function updateLocalConfig(config) {
@@ -354,13 +351,7 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     }
 
     function refreshSystem() {
-        var key = "refreshSystem"
-        if (nextCall[key] && nextCall[key] > Date.now()) {
-            return;
-        }
-        nextCall[key] = Date.now() + requestTimeout;
         $http.get(urlbase + '/system').success(function (data) {
-            nextCall[key] = Date.now() + refreshQuickTimeout;
             $scope.myID = data.myID;
             $scope.system = data;
             console.log("refreshSystem", data);
@@ -373,40 +364,34 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         }
 
         var key = "refreshCompletion" + node + repo;
-        if (nextCall[key] && nextCall[key] > Date.now()) {
-            return;
+        if (!debouncedFuncs[key]) {
+            debouncedFuncs[key] = debounce(function () {
+                $http.get(urlbase + '/completion?node=' + node + '&repo=' + encodeURIComponent(repo)).success(function (data) {
+                    if (!$scope.completion[node]) {
+                        $scope.completion[node] = {};
+                    }
+                    $scope.completion[node][repo] = data.completion;
+
+                    var tot = 0,
+                        cnt = 0;
+                    for (var cmp in $scope.completion[node]) {
+                        if (cmp === "_total") {
+                            continue;
+                        }
+                        tot += $scope.completion[node][cmp];
+                        cnt += 1;
+                    }
+                    $scope.completion[node]._total = tot / cnt;
+
+                    console.log("refreshCompletion", node, repo, $scope.completion[node]);
+                });
+            }, 1000, true);
         }
-        nextCall[key] = Date.now() + requestTimeout;
-        $http.get(urlbase + '/completion?node=' + node + '&repo=' + encodeURIComponent(repo)).success(function (data) {
-            nextCall[key] = Date.now() + refreshTimeout;
-            if (!$scope.completion[node]) {
-                $scope.completion[node] = {};
-            }
-            $scope.completion[node][repo] = data.completion;
-
-            var tot = 0,
-                cnt = 0;
-            for (var cmp in $scope.completion[node]) {
-                if (cmp === "_total") {
-                    continue;
-                }
-                tot += $scope.completion[node][cmp];
-                cnt += 1;
-            }
-            $scope.completion[node]._total = tot / cnt;
-
-            console.log("refreshCompletion", node, repo, $scope.completion[node]);
-        });
+        debouncedFuncs[key]();
     }
 
     function refreshConnectionStats() {
-        var key = "refreshConnectionStats"
-        if (nextCall[key] && nextCall[key] > Date.now()) {
-            return;
-        }
-        nextCall[key] = Date.now() + requestTimeout;
         $http.get(urlbase + '/connections').success(function (data) {
-            nextCall[key] = Date.now() + refreshQuickTimeout;
             var now = Date.now(),
                 td = (now - prevDate) / 1000,
                 id;
@@ -430,13 +415,7 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     }
 
     function refreshErrors() {
-        var key = "refreshErrors"
-        if (nextCall[key] && nextCall[key] > Date.now()) {
-            return;
-        }
-        nextCall[key] = Date.now() + requestTimeout;
         $http.get(urlbase + '/errors').success(function (data) {
-            nextCall[key] = Date.now() + refreshQuickTimeout;
             $scope.errors = data.errors;
             console.log("refreshErrors", data);
         });
@@ -453,14 +432,8 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         });
     }
 
-    var refreshNodeStats = function () {
-        var key = "refreshNode";
-        if (nextCall[key] && nextCall[key] > Date.now()) {
-            return;
-        }
-        nextCall[key] = Date.now() + requestTimeout;
+    var refreshNodeStats = debounce(function () {
         $http.get(urlbase + "/stats/node").success(function (data) {
-            nextCall[key] = Date.now() + refreshTimeout;
             $scope.stats = data;
             for (var node in $scope.stats) {
                 $scope.stats[node].LastSeen = new Date($scope.stats[node].LastSeen);
@@ -468,7 +441,7 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
             }
             console.log("refreshNodeStats", data);
         });
-    }
+    }, 500);
 
     $scope.init = function () {
         refreshSystem();
@@ -725,7 +698,8 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
     $scope.addNode = function () {
         $scope.currentNode = {
             AddressesStr: 'dynamic',
-            Compression: true
+            Compression: true,
+            Introducer: true
         };
         $scope.editingExisting = false;
         $scope.editingSelf = false;
@@ -947,6 +921,44 @@ syncthing.controller('SyncthingCtrl', function ($scope, $http, $translate, $loca
         $scope.saveConfig();
     };
 
+    $scope.editIgnores = function () {
+        if (!$scope.editingExisting) {
+            return;
+        }
+
+        $('#editIgnoresButton').attr('disabled', 'disabled');
+        $http.get(urlbase + '/ignores?repo=' + encodeURIComponent($scope.currentRepo.ID))
+            .success(function (data) {
+                data.ignore = data.ignore || [];
+
+                $('#editRepo').modal('hide');
+                var textArea = $('#editIgnores textarea');
+
+                textArea.val(data.ignore.join('\n'));
+
+                $('#editIgnores').modal()
+                    .on('hidden.bs.modal', function () {
+                        $('#editRepo').modal();
+                    })
+                    .on('shown.bs.modal', function () {
+                        textArea.focus();
+                    });
+            })
+            .then(function () {
+                $('#editIgnoresButton').removeAttr('disabled');
+            });
+    };
+
+    $scope.saveIgnores = function () {
+        if (!$scope.editingExisting) {
+            return;
+        }
+
+        $http.post(urlbase + '/ignores?repo=' + encodeURIComponent($scope.currentRepo.ID), {
+            ignore: $('#editIgnores textarea').val().split('\n')
+        });
+    };
+
     $scope.setAPIKey = function (cfg) {
         cfg.APIKey = randomString(30, 32);
     };
@@ -1119,6 +1131,40 @@ function isEmptyObject(obj) {
         return false;
     }
     return true;
+}
+
+function debounce(func, wait) {
+    var timeout, args, context, timestamp, result, again;
+
+    var later = function () {
+        var last = Date.now() - timestamp;
+        if (last < wait) {
+            timeout = setTimeout(later, wait - last);
+        } else {
+            timeout = null;
+            if (again) {
+                again = false;
+                result = func.apply(context, args);
+                context = args = null;
+            }
+        }
+    };
+
+    return function () {
+        context = this;
+        args = arguments;
+        timestamp = Date.now();
+        var callNow = !timeout;
+        if (!timeout) {
+            timeout = setTimeout(later, wait);
+            result = func.apply(context, args);
+            context = args = null;
+        } else {
+            again = true;
+        }
+
+        return result;
+    };
 }
 
 syncthing.filter('natural', function () {

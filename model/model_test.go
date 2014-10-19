@@ -266,7 +266,7 @@ func TestNodeRename(t *testing.T) {
 		ClientVersion: "v0.9.4",
 	}
 
-	cfg := config.New("test", node1)
+	cfg := config.New("/tmp/test", node1)
 	cfg.Nodes = []config.NodeConfiguration{
 		{
 			NodeID: node1,
@@ -303,10 +303,11 @@ func TestNodeRename(t *testing.T) {
 }
 
 func TestClusterConfig(t *testing.T) {
-	cfg := config.New("test", node1)
+	cfg := config.New("/tmp/test", node1)
 	cfg.Nodes = []config.NodeConfiguration{
 		{
-			NodeID: node1,
+			NodeID:     node1,
+			Introducer: true,
 		},
 		{
 			NodeID: node2,
@@ -351,8 +352,14 @@ func TestClusterConfig(t *testing.T) {
 	if id := r.Nodes[0].ID; bytes.Compare(id, node1[:]) != 0 {
 		t.Errorf("Incorrect node ID %x != %x", id, node1)
 	}
+	if r.Nodes[0].Flags&protocol.FlagIntroducer == 0 {
+		t.Error("Node1 should be flagged as Introducer")
+	}
 	if id := r.Nodes[1].ID; bytes.Compare(id, node2[:]) != 0 {
 		t.Errorf("Incorrect node ID %x != %x", id, node2)
+	}
+	if r.Nodes[1].Flags&protocol.FlagIntroducer != 0 {
+		t.Error("Node2 should not be flagged as Introducer")
 	}
 
 	r = cm.Repositories[1]
@@ -365,7 +372,99 @@ func TestClusterConfig(t *testing.T) {
 	if id := r.Nodes[0].ID; bytes.Compare(id, node1[:]) != 0 {
 		t.Errorf("Incorrect node ID %x != %x", id, node1)
 	}
+	if r.Nodes[0].Flags&protocol.FlagIntroducer == 0 {
+		t.Error("Node1 should be flagged as Introducer")
+	}
 	if id := r.Nodes[1].ID; bytes.Compare(id, node2[:]) != 0 {
 		t.Errorf("Incorrect node ID %x != %x", id, node2)
+	}
+	if r.Nodes[1].Flags&protocol.FlagIntroducer != 0 {
+		t.Error("Node2 should not be flagged as Introducer")
+	}
+}
+
+func TestIgnores(t *testing.T) {
+	arrEqual := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	db, _ := leveldb.Open(storage.NewMemStorage(), nil)
+	m := NewModel("/tmp", nil, "node", "syncthing", "dev", db)
+	m.AddRepo(config.RepositoryConfiguration{ID: "default", Directory: "testdata"})
+
+	expected := []string{
+		".*",
+		"quux",
+	}
+
+	ignores, err := m.GetIgnores("default")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !arrEqual(ignores, expected) {
+		t.Errorf("Incorrect ignores: %v != %v", ignores, expected)
+	}
+
+	ignores = append(ignores, "pox")
+
+	err = m.SetIgnores("default", ignores)
+	if err != nil {
+		t.Error(err)
+	}
+
+	ignores2, err := m.GetIgnores("default")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if arrEqual(expected, ignores2) {
+		t.Errorf("Incorrect ignores: %v == %v", ignores2, expected)
+	}
+
+	if !arrEqual(ignores, ignores2) {
+		t.Errorf("Incorrect ignores: %v != %v", ignores2, ignores)
+	}
+
+	err = m.SetIgnores("default", expected)
+	if err != nil {
+		t.Error(err)
+	}
+
+	ignores, err = m.GetIgnores("default")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !arrEqual(ignores, expected) {
+		t.Errorf("Incorrect ignores: %v != %v", ignores, expected)
+	}
+
+	ignores, err = m.GetIgnores("doesnotexist")
+	if err == nil {
+		t.Error("No error")
+	}
+
+	err = m.SetIgnores("doesnotexist", expected)
+	if err == nil {
+		t.Error("No error")
+	}
+
+	m.AddRepo(config.RepositoryConfiguration{ID: "fresh", Directory: "XXX"})
+	ignores, err = m.GetIgnores("fresh")
+	if err != nil {
+		t.Error(err)
+	}
+	if len(ignores) > 0 {
+		t.Errorf("Expected no ignores, got: %v", ignores)
 	}
 }
