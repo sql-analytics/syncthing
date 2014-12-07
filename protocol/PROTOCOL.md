@@ -189,6 +189,14 @@ Cluster Config messages MUST NOT be sent after the initial exchange.
     \                Zero or more Device Structures                 \
     /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Flags                             |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                       Number of Options                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    /                                                               /
+    \                Zero or more Option Structures                 \
+    /                                                               /
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 
     Device Structure:
@@ -202,11 +210,17 @@ Cluster Config messages MUST NOT be sent after the initial exchange.
     \                     ID (variable length)                      \
     /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |                             Flags                             |
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                                                               |
     +                  Max Local Version (64 bits)                  +
     |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Flags                             |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                       Number of Options                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    /                                                               /
+    \                Zero or more Option Structures                 \
+    /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 
@@ -227,6 +241,7 @@ Cluster Config messages MUST NOT be sent after the initial exchange.
     \                    Value (variable length)                    \
     /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
 
 #### Fields
 
@@ -313,12 +328,15 @@ peers acting in a specific manner as a result of sent options.
     struct Folder {
         string ID<>;
         Device Devices<>;
+        unsigned int Flags;
+        Option Options<64>;
     }
 
     struct Device {
         string ID<>;
-        unsigned int Flags;
         unsigned hyper MaxLocalVersion;
+        unsigned int Flags;
+        Option Options<64>;
     }
 
     struct Option {
@@ -360,6 +378,14 @@ Index message MUST be sent. There is no response to the Index message.
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     /                                                               /
     \               Zero or more FileInfo Structures                \
+    /                                                               /
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Flags                             |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                       Number of Options                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    /                                                               /
+    \                Zero or more Option Structures                 \
     /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
@@ -417,24 +443,24 @@ The Folder field identifies the folder that the index message
 pertains to. For single folder implementations the device MAY send an
 empty folder ID or use the string "default".
 
-The Name is the file name path relative to the folder root. Like all
-strings in BEP, the Name is always in UTF-8 NFC regardless of operating
-system or file system specific conventions. The Name field uses the
-slash character ("/") as path separator, regardless of the
-implementation's operating system conventions. The combination of
+The FileInfo Name field is the file name path relative to the folder
+root. Like all strings in BEP, the Name is always in UTF-8 NFC
+regardless of operating system or file system specific conventions. The
+Name field uses the slash character ("/") as path separator, regardless
+of the implementation's operating system conventions. The combination of
 Folder and Name uniquely identifies each file in a cluster.
 
-The Version field is the value of a cluster wide Lamport clock
+The FileInfo Version field is the value of a cluster wide Lamport clock
 indicating when the change was detected. The clock ticks on every
 detected and received change. The combination of Folder, Name and
 Version uniquely identifies the contents of a file at a given point in
 time.
 
-The Local Version field is the value of a device local monotonic clock at
-the time of last local database update to a file. The clock ticks on
-every local database update.
+The FileInfo Local Version field is the value of a device local
+monotonic clock at the time of last local database update to a file. The
+clock ticks on every local database update.
 
-The Flags field is made up of the following single bit flags:
+The FileInfo Flags field is made up of the following single bit flags:
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -473,11 +499,11 @@ The Flags field is made up of the following single bit flags:
  - Bit 0 through 14 are reserved for future use and SHALL be set to
    zero.
 
-The hash algorithm is implied by the Hash length. Currently, the hash
-MUST be 32 bytes long and computed by SHA256.
+The hash algorithm is implied by the FileInfo Hash length. Currently,
+the hash MUST be 32 bytes long and computed by SHA256.
 
-The Modified time is expressed as the number of seconds since the Unix
-Epoch (1970-01-01 00:00:00 UTC).
+The FileInfo Modified time is expressed as the number of seconds since
+the Unix Epoch (1970-01-01 00:00:00 UTC).
 
 In the rare occasion that a file is simultaneously and independently
 modified by two devices in the same cluster and thus end up on the same
@@ -485,15 +511,22 @@ Version number after modification, the Modified field is used as a tie
 breaker (higher being better), followed by the hash values of the file
 blocks (lower being better).
 
-The Blocks list contains the size and hash for each block in the file.
-Each block represents a 128 KiB slice of the file, except for the last
-block which may represent a smaller amount of data.
+The FileInfo Blocks list contains the size and hash for each block in
+the file. Each block represents a 128 KiB slice of the file, except for
+the last block which may represent a smaller amount of data.
+
+The IndexMessage Flags and Options fields are present for future
+extensibility. They should be set to zero (Flags) and the empty list
+(Options). Any flag bits or options not recognized by an implementation
+SHOULD be ignored.
 
 #### XDR
 
     struct IndexMessage {
         string Folder<>;
         FileInfo Files<>;
+        unsigned int Flags;
+        Option Options<64>;
     }
 
     struct FileInfo {
@@ -540,6 +573,20 @@ corresponding to a part of a certain file in the peer's folder.
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                             Size                              |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                        Length of Hash                         |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    /                                                               /
+    \                    Hash (variable length)                     \
+    /                                                               /
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Flags                             |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                       Number of Options                       |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    /                                                               /
+    \                Zero or more Option Structures                 \
+    /                                                               /
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 #### Fields
 
@@ -555,6 +602,9 @@ message.
         string Name<>;
         unsigned hyper Offset;
         unsigned int Size;
+        opaque Hash<64>;
+        unsigned int Flags;
+        Option Options<64>;
     }
 
 ### Response (Type = 3)
@@ -572,6 +622,8 @@ The Response message is sent in response to a Request message.
     \                    Data (variable length)                     \
     /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Error                             |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 #### Fields
 
@@ -583,6 +635,7 @@ requested block is not available.
 
     struct ResponseMessage {
         opaque Data<>
+        unsigned int Error;
     }
 
 ### Ping (Type = 4)
@@ -607,6 +660,8 @@ followed by further messages.
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             Code                              |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                       Length of Reason                        |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     /                                                               /
@@ -620,6 +675,7 @@ The Reason field contains a human description of the error condition,
 suitable for consumption by a human.
 
     struct CloseMessage {
+        unsigned int Code;
         string Reason<1024>;
     }
 
