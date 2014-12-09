@@ -764,12 +764,12 @@ func (m *Model) GetIgnores(folder string) ([]string, []string, error) {
 		return lines, nil, fmt.Errorf("Folder %s does not exist", folder)
 	}
 
-	fd, err := os.Open(filepath.Join(cfg.Path, ".stignore"))
+	fd, err := os.Open(cfg.IgnoresPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return lines, nil, nil
 		}
-		l.Warnln("Loading .stignore:", err)
+		l.Warnln("Loading ignores:", err)
 		return lines, nil, err
 	}
 	defer fd.Close()
@@ -795,9 +795,9 @@ func (m *Model) SetIgnores(folder string, content []string) error {
 		return fmt.Errorf("Folder %s does not exist", folder)
 	}
 
-	fd, err := ioutil.TempFile(cfg.Path, ".syncthing.stignore-"+folder)
+	fd, err := ioutil.TempFile(cfg.MarkerPath(), "ignores.txt")
 	if err != nil {
-		l.Warnln("Saving .stignore:", err)
+		l.Warnln("Saving ignores:", err)
 		return err
 	}
 	defer os.Remove(fd.Name())
@@ -805,21 +805,20 @@ func (m *Model) SetIgnores(folder string, content []string) error {
 	for _, line := range content {
 		_, err = fmt.Fprintln(fd, line)
 		if err != nil {
-			l.Warnln("Saving .stignore:", err)
+			l.Warnln("Saving ignores:", err)
 			return err
 		}
 	}
 
 	err = fd.Close()
 	if err != nil {
-		l.Warnln("Saving .stignore:", err)
+		l.Warnln("Saving ignores:", err)
 		return err
 	}
 
-	file := filepath.Join(cfg.Path, ".stignore")
-	err = osutil.Rename(fd.Name(), file)
+	err = osutil.Rename(fd.Name(), cfg.IgnoresPath())
 	if err != nil {
-		l.Warnln("Saving .stignore:", err)
+		l.Warnln("Saving ignores:", err)
 		return err
 	}
 
@@ -1013,7 +1012,7 @@ func (m *Model) AddFolder(cfg config.FolderConfiguration) {
 		m.deviceFolders[device.DeviceID] = append(m.deviceFolders[device.DeviceID], cfg.ID)
 	}
 
-	ignores, _ := ignore.Load(filepath.Join(cfg.Path, ".stignore"), m.cfg.Options().CacheIgnoredFiles)
+	ignores, _ := ignore.Load(cfg.IgnoresPath(), m.cfg.Options().CacheIgnoredFiles)
 	m.folderIgnores[cfg.ID] = ignores
 
 	m.addedFolder = true
