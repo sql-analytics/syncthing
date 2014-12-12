@@ -32,12 +32,12 @@ RUN go get github.com/calmh/gonative \
 # Rebuild the special and missing versions, using patches as appropriate
 
 RUN mkdir /tmp/patches
-ADD *.patch /tmp/patches
+ADD *.patch /tmp/patches/
 RUN bash -xec '\
-	cd /usr/local/go \
+	cd /usr/local/go ; \
 	for patch in /tmp/patches/*.patch ; do \
 		patch -p0 < "$patch" ; \
-	done ; \
+	done \
 	'
 
 RUN bash -xec '\
