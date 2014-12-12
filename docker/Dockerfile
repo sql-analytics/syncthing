@@ -29,7 +29,16 @@ RUN go get github.com/calmh/gonative \
         && rm -rf go \
         && gonative -version $GOLANG_VERSION
 
-# Rebuild the special and missing versions
+# Rebuild the special and missing versions, using patches as appropriate
+
+RUN mkdir /tmp/patches
+ADD *.patch /tmp/patches
+RUN bash -xec '\
+	cd /usr/local/go 
+	for patch in /tmp/patches/*.patch ; do
+		patch -p1 < "$patch"
+	done
+	'
 
 RUN bash -xec '\
                 cd /usr/local/go/src; \
